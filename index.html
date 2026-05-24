@@ -10,18 +10,19 @@
 <meta name="theme-color" content="#0A0A0F"/>
 <title>Just Calories</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,200;14..32,300;14..32,400;14..32,500&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;background:#0A0A0F;font-family:'Plus Jakarta Sans',sans-serif;overflow:hidden}
+html,body{height:100%;background:#0A0A0F;font-family:'Inter',sans-serif;overflow:hidden}
 #root{height:100%;overflow:hidden}
 ::-webkit-scrollbar{width:0}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
 @keyframes ripple{0%{box-shadow:0 0 0 0 rgba(255,68,68,0.4)}100%{box-shadow:0 0 0 20px rgba(255,68,68,0)}}
-textarea::placeholder{color:rgba(240,240,248,0.28);font-family:'Plus Jakarta Sans',sans-serif;font-size:13px}
+textarea::placeholder{color:rgba(240,240,248,0.28);font-family:'Inter',sans-serif;font-size:13px}
 input::placeholder{color:rgba(240,240,248,0.3)}
-button{font-family:'Plus Jakarta Sans',sans-serif;cursor:pointer}
+button{font-family:'Inter',sans-serif;cursor:pointer}
 </style>
 </head>
 <body>
@@ -181,7 +182,7 @@ const IcGear = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
 function Spinner({text}) {
   return <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:20,background:C.bg}}>
     <div style={{width:44,height:44,border:`3px solid ${C.border}`,borderTop:`3px solid ${C.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
-    <p style={{fontSize:16,fontWeight:700,color:C.text}}>{text}</p>
+    <p style={{fontSize:16,fontWeight:500,color:C.text}}>{text}</p>
   </div>;
 }
 
@@ -303,7 +304,7 @@ function MealCard({meal,onTap,onQuickEdit,onDelete}) {
   const onTE=()=>{if(swipeX<=-THRESHOLD){onDelete(meal.id);}else{setSwipeX(0);setSwiping(false);}};
   return <div style={{position:"relative",marginBottom:10,borderRadius:16,overflow:"hidden"}}>
     <div style={{position:"absolute",inset:0,background:C.red,borderRadius:16,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:20}}>
-      <span style={{color:"#fff",fontSize:13,fontWeight:700,marginRight:6}}>Delete</span><IcTrash/>
+      <span style={{color:"#fff",fontSize:13,fontWeight:400,marginRight:6}}>Delete</span><IcTrash/>
     </div>
     <div style={{display:"flex",alignItems:"center",gap:12,background:C.card,border:`1px solid ${isWorkout?C.oMid:C.border}`,borderRadius:16,padding:"12px 14px",cursor:"pointer",transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
       onClick={()=>{if(!editing&&swipeX===0)onTap(meal);}}
@@ -313,15 +314,15 @@ function MealCard({meal,onTap,onQuickEdit,onDelete}) {
         :<div style={{width:54,height:54,borderRadius:12,background:isWorkout?C.oDim:C.hover,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:22}}>{isWorkout?"🔥":meal.emoji||"🍽️"}</span></div>
       }
       <div style={{flex:1,minWidth:0}}>
-        <p style={{fontSize:14,fontWeight:700,color:isWorkout?C.orange:C.text,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{meal.mealTitle}</p>
-        <p style={{fontSize:11,color:C.sub,lineHeight:1.4,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{meal.summary}</p>
-        <p style={{fontSize:10,color:C.dim,marginTop:3}}>{meal.time}</p>
+        <p style={{fontSize:14,fontWeight:400,color:isWorkout?C.orange:C.text,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{meal.mealTitle}</p>
+        <p style={{fontSize:11,fontWeight:300,color:C.sub,lineHeight:1.4,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{meal.summary}</p>
+        <p style={{fontSize:10,fontWeight:300,color:C.dim,marginTop:3}}>{meal.time}</p>
       </div>
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1,padding:"8px 10px",background:isWorkout?C.oDim:C.aDim,borderRadius:12,minWidth:56,position:"relative",flexShrink:0}}
         onClick={e=>{e.stopPropagation();setEditing(true);setVal(String(meal.totalCalories));}}>
         {editing
-          ?<input autoFocus type="number" inputMode="numeric" style={{width:48,background:"transparent",border:"none",borderBottom:`2px solid ${isWorkout?C.orange:C.accent}`,color:isWorkout?C.orange:C.accent,fontSize:16,fontWeight:800,textAlign:"center",outline:"none",fontFamily:"'Plus Jakarta Sans',sans-serif"}} value={val} onChange={e=>setVal(e.target.value)} onBlur={commit} onKeyDown={e=>e.key==="Enter"&&commit()} onClick={e=>e.stopPropagation()}/>
-          :<><span style={{fontSize:16,fontWeight:800,color:isWorkout?C.orange:C.accent,letterSpacing:"-0.5px"}}>{isWorkout?"-":""}{meal.totalCalories}</span><span style={{fontSize:9,color:isWorkout?C.oMid:C.aMid,textTransform:"uppercase"}}>{isWorkout?"burned":"kcal"}</span><span style={{position:"absolute",top:4,right:4,color:isWorkout?C.oMid:C.aMid}}><IcEdit/></span></>
+          ?<input autoFocus type="number" inputMode="numeric" style={{width:48,background:"transparent",border:"none",borderBottom:`2px solid ${isWorkout?C.orange:C.accent}`,color:isWorkout?C.orange:C.accent,fontSize:16,fontWeight:200,textAlign:"center",outline:"none",fontFamily:"'Inter',sans-serif"}} value={val} onChange={e=>setVal(e.target.value)} onBlur={commit} onKeyDown={e=>e.key==="Enter"&&commit()} onClick={e=>e.stopPropagation()}/>
+          :<><span style={{fontSize:16,fontWeight:200,color:isWorkout?C.orange:C.accent,letterSpacing:"-0.5px"}}>{isWorkout?"-":""}{meal.totalCalories}</span><span style={{fontSize:9,color:isWorkout?C.oMid:C.aMid,textTransform:"uppercase"}}>{isWorkout?"burned":"kcal"}</span><span style={{position:"absolute",top:4,right:4,color:isWorkout?C.oMid:C.aMid}}><IcEdit/></span></>
         }
       </div>
     </div>
@@ -347,18 +348,18 @@ function WorkoutModal({onAdd,onClose}) {
   return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end",zIndex:100}} onClick={onClose}>
     <div style={{width:"100%",background:C.surface,borderRadius:"20px 20px 0 0",padding:"24px 20px 48px",border:`1px solid ${C.border}`}} onClick={e=>e.stopPropagation()}>
       <div style={{width:36,height:4,background:C.border,borderRadius:2,margin:"0 auto 20px"}}/>
-      <p style={{fontSize:17,fontWeight:800,color:C.text,marginBottom:4}}>Log Workout</p>
-      <p style={{fontSize:12,color:C.sub,marginBottom:20}}>Calories burned will increase today's goal</p>
+      <p style={{fontSize:17,fontWeight:500,color:C.text,marginBottom:4}}>Log Workout</p>
+      <p style={{fontSize:12,fontWeight:300,color:C.sub,marginBottom:20}}>Calories burned will increase today's goal</p>
       <div style={{position:"relative",marginBottom:12}}>
         <input type="text" placeholder="Activity (e.g. OrangeTheory, Walking…)" value={label} onChange={e=>handleLabelChange(e.target.value)} onBlur={()=>setTimeout(()=>setShowSugg(false),150)}
-          style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:15,padding:"12px 16px",outline:"none",fontFamily:"'Plus Jakarta Sans',sans-serif"}}/>
+          style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:15,padding:"12px 16px",outline:"none",fontFamily:"'Inter',sans-serif"}}/>
         {showSugg&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",zIndex:10,marginTop:4}}>
           {suggestions.map((s,i)=><div key={i} onMouseDown={()=>{setLabel(s);setShowSugg(false);}} style={{padding:"12px 16px",fontSize:14,color:C.text,cursor:"pointer",borderBottom:i<suggestions.length-1?`1px solid ${C.border}`:"none"}}>{s}</div>)}
         </div>}
       </div>
       <input ref={calRef} type="number" inputMode="numeric" placeholder="Calories burned" value={cal} onChange={e=>setCal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}
-        style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:22,fontWeight:800,padding:"14px 16px",outline:"none",fontFamily:"'Plus Jakarta Sans',sans-serif",marginBottom:16,letterSpacing:"-0.5px"}}/>
-      <button style={{width:"100%",background:C.orange,border:"none",borderRadius:14,color:"#fff",fontSize:15,fontWeight:700,padding:"16px",opacity:parseInt(cal)>0?1:0.4}} onClick={submit} disabled={!(parseInt(cal)>0)}>Add Workout 🔥</button>
+        style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:22,fontWeight:200,padding:"14px 16px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:16,letterSpacing:"-0.5px"}}/>
+      <button style={{width:"100%",background:C.orange,border:"none",borderRadius:14,color:"#fff",fontSize:15,fontWeight:500,padding:"16px",opacity:parseInt(cal)>0?1:0.4}} onClick={submit} disabled={!(parseInt(cal)>0)}>Add Workout 🔥</button>
     </div>
   </div>;
 }
@@ -377,12 +378,12 @@ function SettingsScreen({apiKey,onSave,onBack}) {
   return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 12px) 16px 20px"}}>
       <button style={{width:44,height:44,borderRadius:12,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onBack}><IcBack/></button>
-      <span style={{fontSize:16,fontWeight:700,color:C.text}}>Settings</span>
+      <span style={{fontSize:16,fontWeight:500,color:C.text}}>Settings</span>
       <div style={{width:44}}/>
     </div>
     <div style={{padding:"0 16px",display:"flex",flexDirection:"column",gap:14}}>
       <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px 18px 16px"}}>
-        <p style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:6}}>OpenAI API Key</p>
+        <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>OpenAI API Key</p>
         {masked
           ?<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,padding:"10px 12px",background:C.aDim,borderRadius:10,border:`1px solid ${C.aMid}`}}>
             <span style={{fontSize:11,color:C.accent,fontWeight:600}}>✓ Key saved:</span>
@@ -394,19 +395,19 @@ function SettingsScreen({apiKey,onSave,onBack}) {
         <input type="password" placeholder={masked?"Enter new key to replace…":"sk-..."} value={val}
           onChange={e=>{setVal(e.target.value);setErr("");setSaved(false);}}
           onKeyDown={e=>e.key==="Enter"&&submit()}
-          style={{width:"100%",background:C.hover,border:`1px solid ${err?C.red:C.border}`,borderRadius:12,color:C.text,fontSize:14,padding:"13px 14px",outline:"none",fontFamily:"'Plus Jakarta Sans',sans-serif",marginBottom:8}}/>
+          style={{width:"100%",background:C.hover,border:`1px solid ${err?C.red:C.border}`,borderRadius:12,color:C.text,fontSize:14,padding:"13px 14px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:8}}/>
         {err&&<p style={{color:C.red,fontSize:12,marginBottom:8}}>{err}</p>}
-        <button style={{width:"100%",background:saved?C.aDim:C.accent,border:saved?`1px solid ${C.aMid}`:"none",borderRadius:12,color:saved?C.accent:C.bg,fontSize:14,fontWeight:700,padding:"13px"}} onClick={submit}>
+        <button style={{width:"100%",background:saved?C.aDim:C.accent,border:saved?`1px solid ${C.aMid}`:"none",borderRadius:12,color:saved?C.accent:C.bg,fontSize:14,fontWeight:500,padding:"13px"}} onClick={submit}>
           {saved?"✓ Key Saved!":"Save Key"}
         </button>
       </div>
       <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
-        <p style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:8}}>Voice Transcription</p>
-        <p style={{fontSize:12,color:C.sub,lineHeight:1.7}}>Voice logging uses your browser's built-in speech recognition — free, no extra key needed. Works best in Chrome and Safari on iOS/Android.</p>
+        <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:8}}>Voice Transcription</p>
+        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.7}}>Voice logging uses your browser's built-in speech recognition — free, no extra key needed. Works best in Chrome and Safari on iOS/Android.</p>
       </div>
       <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
-        <p style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:8}}>About Just Calories</p>
-        <p style={{fontSize:12,color:C.sub,lineHeight:1.7}}>Photos are analyzed by GPT-5.5 — including barcodes and food labels. Voice descriptions are processed locally by your browser. All data stored on-device only.</p>
+        <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:8}}>About Just Calories</p>
+        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.7}}>Photos are analyzed by GPT-5.5 — including barcodes and food labels. Voice descriptions are processed locally by your browser. All data stored on-device only.</p>
       </div>
     </div>
   </div>;
@@ -419,15 +420,15 @@ function ApiKeyScreen({onSave}) {
   return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",background:C.bg}}>
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"40px 28px",width:"100%",maxWidth:380}}>
       <span style={{fontSize:52,marginBottom:12}}>⚡</span>
-      <h1 style={{fontSize:32,fontWeight:800,color:C.text,textAlign:"center",lineHeight:1.15,letterSpacing:"-1px",marginBottom:6}}>Just Calories</h1>
-      <p style={{color:C.accent,fontSize:13,fontWeight:600,marginBottom:32,marginTop:6}}>Powered by GPT-5.5 Vision</p>
+      <h1 style={{fontSize:32,fontWeight:200,color:C.text,textAlign:"center",lineHeight:1.15,letterSpacing:"-1.5px",marginBottom:6}}>Just Calories</h1>
+      <p style={{color:C.accent,fontSize:13,fontWeight:300,marginBottom:32,marginTop:6}}>Powered by GPT-5.5 Vision</p>
       <div style={{width:"100%",background:C.surface,borderRadius:20,padding:"24px 20px",border:`1px solid ${C.border}`}}>
         <p style={{color:C.sub,fontSize:13,lineHeight:1.7,textAlign:"center",marginBottom:4}}>Enter your OpenAI API key to get started.</p>
         <p style={{color:C.dim,fontSize:12,lineHeight:1.6,textAlign:"center",marginBottom:16}}>Get one at <span style={{color:C.accent}}>platform.openai.com/api-keys</span></p>
-        <input style={{width:"100%",background:C.hover,border:`1px solid ${err?C.red:C.border}`,borderRadius:12,color:C.text,fontSize:15,padding:"14px 16px",outline:"none",fontFamily:"'Plus Jakarta Sans',sans-serif"}}
+        <input style={{width:"100%",background:C.hover,border:`1px solid ${err?C.red:C.border}`,borderRadius:12,color:C.text,fontSize:15,padding:"14px 16px",outline:"none",fontFamily:"'Inter',sans-serif"}}
           type="password" placeholder="sk-..." value={val} onChange={e=>{setVal(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&submit()}/>
         {err&&<p style={{color:C.red,fontSize:12,marginTop:6}}>{err}</p>}
-        <button style={{width:"100%",background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:700,padding:"16px",marginTop:14}} onClick={submit}>Get Started →</button>
+        <button style={{width:"100%",background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"16px",marginTop:14}} onClick={submit}>Get Started →</button>
       </div>
       <p style={{color:C.dim,fontSize:11,marginTop:14,textAlign:"center",lineHeight:1.6}}>Stored only on this device. Never shared.</p>
     </div>
@@ -457,14 +458,14 @@ function HomeScreen({onOpenCamera,onOpenVoice,onSelectMeal,onAddWorkout,onOpenSe
       <div style={{paddingTop:12,display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <span style={{fontSize:20}}>⚡</span>
-          <span style={{fontSize:17,fontWeight:800,color:C.text,letterSpacing:"-0.5px"}}>Just Calories</span>
+          <span style={{fontSize:17,fontWeight:500,color:C.text,letterSpacing:"-0.3px"}}>Just Calories</span>
         </div>
         <button style={{width:36,height:36,borderRadius:10,background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onOpenSettings}><IcGear/></button>
       </div>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
         <button style={{width:34,height:34,borderRadius:10,background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>shift(-1)}><IcLeft/></button>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-          <span style={{fontSize:14,fontWeight:600,color:C.text}}>{fmtDisplay(date)}</span>
+          <span style={{fontSize:14,fontWeight:400,color:C.text}}>{fmtDisplay(date)}</span>
           {!isToday(date)&&<button style={{background:C.aDim,border:`1px solid ${C.aMid}`,color:C.accent,borderRadius:20,fontSize:11,fontWeight:600,padding:"2px 10px"}} onClick={()=>setDate(new Date())}>Today</button>}
         </div>
         <button style={{width:34,height:34,borderRadius:10,background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>shift(1)}><IcRight/></button>
@@ -473,32 +474,32 @@ function HomeScreen({onOpenCamera,onOpenVoice,onSelectMeal,onAddWorkout,onOpenSe
 
     <div style={{display:"flex",gap:10,padding:"0 16px 16px"}}>
       <div style={{flex:1,minWidth:0,overflow:"hidden",display:"flex",flexDirection:"column",gap:3,padding:"16px 18px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:18}}>
-        <span style={{fontSize:9,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:2}}>Calories</span>
+        <span style={{fontSize:9,fontWeight:400,color:C.dim,textTransform:"uppercase",letterSpacing:"1px",marginBottom:2}}>Calories</span>
         <div style={{display:"flex",alignItems:"baseline",gap:3,flexWrap:"wrap"}}>
-          <span style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-1px",lineHeight:1}}>{eaten}</span>
+          <span style={{fontSize:26,fontWeight:200,color:C.text,letterSpacing:"-1.5px",lineHeight:1}}>{eaten}</span>
           <span style={{fontSize:16,color:C.dim,fontWeight:300,margin:"0 2px"}}>/</span>
           {editGoal
-            ?<input autoFocus type="number" inputMode="numeric" style={{background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:22,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif",letterSpacing:"-0.5px",outline:"none",padding:0,width:80,lineHeight:1}} value={goalVal} onChange={e=>setGoalVal(e.target.value)} onBlur={commitGoal} onKeyDown={e=>e.key==="Enter"&&commitGoal()}/>
-            :<span style={{fontSize:20,fontWeight:700,color:C.sub,letterSpacing:"-0.5px",cursor:"pointer",lineHeight:1}} onClick={()=>{setGoalVal(String(baseGoal));setEditGoal(true);}}>{goal}</span>
+            ?<input autoFocus type="number" inputMode="numeric" style={{background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:22,fontWeight:200,fontFamily:"'Inter',sans-serif",letterSpacing:"-0.5px",outline:"none",padding:0,width:80,lineHeight:1}} value={goalVal} onChange={e=>setGoalVal(e.target.value)} onBlur={commitGoal} onKeyDown={e=>e.key==="Enter"&&commitGoal()}/>
+            :<span style={{fontSize:20,fontWeight:200,color:C.sub,letterSpacing:"-0.5px",cursor:"pointer",lineHeight:1}} onClick={()=>{setGoalVal(String(baseGoal));setEditGoal(true);}}>{goal}</span>
           }
           {!editGoal&&<span style={{color:C.dim,cursor:"pointer",display:"inline-flex",alignItems:"center",marginLeft:2}} onClick={()=>{setGoalVal(String(baseGoal));setEditGoal(true);}}><IcEdit/></span>}
         </div>
-        <span style={{fontSize:9,color:C.dim,fontWeight:500,marginTop:1}}>{editGoal?"enter base goal + return":burned>0?`${baseGoal} + ${burned} burned`:"calories eaten / goal"}</span>
+        <span style={{fontSize:9,color:C.dim,fontWeight:300,marginTop:1}}>{editGoal?"enter base goal + return":burned>0?`${baseGoal} + ${burned} burned`:"calories eaten / goal"}</span>
         <div style={{marginTop:6,paddingTop:6,borderTop:`1px solid ${C.border}`,display:"flex",alignItems:"baseline",gap:4}}>
-          <span style={{fontSize:18,fontWeight:800,color:"#60C8F5",letterSpacing:"-0.5px",lineHeight:1}}>{protein}g</span>
-          <span style={{fontSize:9,color:C.dim,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.5px"}}>protein</span>
+          <span style={{fontSize:18,fontWeight:200,color:"#60C8F5",letterSpacing:"-0.5px",lineHeight:1}}>{protein}g</span>
+          <span style={{fontSize:9,color:C.dim,fontWeight:300,textTransform:"uppercase",letterSpacing:"0.5px"}}>protein</span>
         </div>
       </div>
       <div style={{flex:1,minWidth:0,overflow:"hidden",display:"flex",flexDirection:"column",gap:3,padding:"16px 18px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:18}}>
-        <span style={{fontSize:9,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:2}}>Weight</span>
+        <span style={{fontSize:9,fontWeight:400,color:C.dim,textTransform:"uppercase",letterSpacing:"1px",marginBottom:2}}>Weight</span>
         <div style={{display:"flex",alignItems:"baseline",gap:3}}>
           {editWeight
-            ?<input autoFocus style={{background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:26,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif",letterSpacing:"-1px",outline:"none",padding:0,width:80,lineHeight:1}} placeholder="0" value={weightVal} onChange={e=>setWeightVal(e.target.value)} onBlur={commitWeight} onKeyDown={e=>e.key==="Enter"&&commitWeight()}/>
-            :<span style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-1px",lineHeight:1,cursor:"pointer"}} onClick={()=>{setWeightVal(latestW>0?String(latestW):"");setEditWeight(true);}}>{latestW>0?latestW:"—"}</span>
+            ?<input autoFocus style={{background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:26,fontWeight:200,fontFamily:"'Inter',sans-serif",letterSpacing:"-1.5px",outline:"none",padding:0,width:80,lineHeight:1}} placeholder="0" value={weightVal} onChange={e=>setWeightVal(e.target.value)} onBlur={commitWeight} onKeyDown={e=>e.key==="Enter"&&commitWeight()}/>
+            :<span style={{fontSize:26,fontWeight:200,color:C.text,letterSpacing:"-1.5px",lineHeight:1,cursor:"pointer"}} onClick={()=>{setWeightVal(latestW>0?String(latestW):"");setEditWeight(true);}}>{latestW>0?latestW:"—"}</span>
           }
           {!editWeight&&<span style={{color:C.dim,cursor:"pointer",display:"inline-flex",alignItems:"center",marginLeft:2}} onClick={()=>{setWeightVal(latestW>0?String(latestW):"");setEditWeight(true);}}><IcEdit/></span>}
         </div>
-        <span style={{fontSize:9,color:C.dim,fontWeight:500,marginTop:1}}>{editWeight?"lbs, then return":"lbs"}</span>
+        <span style={{fontSize:9,color:C.dim,fontWeight:300,marginTop:1}}>{editWeight?"lbs, then return":"lbs"}</span>
         {weightLog.length>=2&&<div style={{marginTop:4}}><WeightSparkline data={weightLog}/></div>}
       </div>
     </div>
@@ -530,7 +531,7 @@ function HomeScreen({onOpenCamera,onOpenVoice,onSelectMeal,onAddWorkout,onOpenSe
 
     <div style={{padding:"0 16px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-        <span style={{fontSize:15,fontWeight:700,color:C.text}}>Meals & Workouts</span>
+        <span style={{fontSize:15,fontWeight:500,color:C.text}}>Meals & Workouts</span>
         <span style={{fontSize:12,color:C.dim}}>{meals.length} {meals.length===1?"entry":"entries"}</span>
       </div>
       {meals.length===0
@@ -636,7 +637,7 @@ function VoiceScreen({apiKey,onBack,onAdd}) {
   return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:40}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 12px) 16px 12px"}}>
       <button style={{width:44,height:44,borderRadius:12,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{speech.stop();onBack();}}><IcBack/></button>
-      <span style={{fontSize:16,fontWeight:700,color:C.text}}>Voice Log</span>
+      <span style={{fontSize:16,fontWeight:500,color:C.text}}>Voice Log</span>
       <div style={{width:44}}/>
     </div>
     <div style={{display:"flex",flexDirection:"column",gap:16,padding:"8px 20px 40px"}}>
@@ -645,27 +646,27 @@ function VoiceScreen({apiKey,onBack,onAdd}) {
           style={{width:100,height:100,borderRadius:"50%",background:speech.listening?"rgba(255,68,68,0.12)":"rgba(74,230,138,0.1)",border:`2px solid ${speech.listening?C.red:C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all 0.3s",boxShadow:speech.listening?"0 0 0 12px rgba(255,68,68,0.06)":"0 0 0 12px rgba(74,230,138,0.06)",animation:speech.listening?"ripple 1.5s ease-out infinite":"none"}}>
           <div style={{color:speech.listening?C.red:C.accent}}>{speech.listening?<IcStop size={32}/>:<IcMic size={40}/>}</div>
         </div>
-        <p style={{fontSize:15,fontWeight:600,color:speech.listening?C.red:C.sub,textAlign:"center"}}>
+        <p style={{fontSize:15,fontWeight:300,color:speech.listening?C.red:C.sub,textAlign:"center"}}>
           {!speech.supported?"Type your meal below":speech.listening?"Listening… tap to stop":"Tap mic to speak"}
         </p>
       </div>
       <VoiceVisualizer active={speech.listening} mediaStream={speech.stream}/>
       <div style={{position:"relative"}}>
-        <textarea style={{width:"100%",minHeight:110,background:C.surface,border:`1px solid ${transcript?C.aMid:C.border}`,borderRadius:14,color:transcript?C.text:C.sub,fontSize:14,padding:"14px 16px",resize:"none",outline:"none",fontFamily:"'Plus Jakarta Sans',sans-serif",lineHeight:1.65,transition:"border-color 0.2s"}}
+        <textarea style={{width:"100%",minHeight:110,background:C.surface,border:`1px solid ${transcript?C.aMid:C.border}`,borderRadius:14,color:transcript?C.text:C.sub,fontSize:14,padding:"14px 16px",resize:"none",outline:"none",fontFamily:"'Inter',sans-serif",lineHeight:1.65,transition:"border-color 0.2s"}}
           placeholder={speech.supported?"Words appear here as you speak…\nOr type what you ate.":"Type what you ate (e.g. 'grilled chicken, rice, broccoli')"}
           value={transcript} onChange={e=>handleChange(e.target.value)} onBlur={()=>setTimeout(()=>setShowFoodSugg(false),150)}/>
         {showFoodSugg&&<div style={{position:"absolute",bottom:"100%",left:0,right:0,background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:4,zIndex:10}}>
-          <p style={{fontSize:10,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:"0.8px",padding:"8px 14px 4px"}}>Previously logged</p>
+          <p style={{fontSize:10,fontWeight:400,color:C.dim,textTransform:"uppercase",letterSpacing:"1px",padding:"8px 14px 4px"}}>Previously logged</p>
           {foodSugg.map((f,i)=><div key={i} onMouseDown={()=>{const w=transcript.split(/[\s,]+/);w[w.length-1]=f.name;setTranscript(w.join(" ")+` (${f.calories} cal)`);setShowFoodSugg(false);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderTop:`1px solid ${C.border}`,cursor:"pointer"}}>
             <span style={{fontSize:14,color:C.text}}>{f.name}</span>
-            <span style={{fontSize:13,fontWeight:700,color:C.accent}}>{f.calories} cal</span>
+            <span style={{fontSize:13,fontWeight:400,color:C.accent}}>{f.calories} cal</span>
           </div>)}
         </div>}
       </div>
       {error&&<p style={{color:C.red,fontSize:13,textAlign:"center",lineHeight:1.5}}>{error}</p>}
       <div style={{display:"flex",gap:10}}>
-        {speech.listening&&<button style={{flexShrink:0,background:C.rDim,border:`2px solid ${C.red}`,borderRadius:14,color:C.red,fontSize:13,fontWeight:700,padding:"16px 14px",display:"flex",alignItems:"center",gap:6}} onClick={speech.stop}><IcStop size={14}/> Stop</button>}
-        <button style={{flex:1,background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:700,padding:"16px",opacity:transcript.trim()?1:0.3}} onClick={submit} disabled={!transcript.trim()}>Add to Log →</button>
+        {speech.listening&&<button style={{flexShrink:0,background:C.rDim,border:`2px solid ${C.red}`,borderRadius:14,color:C.red,fontSize:13,fontWeight:500,padding:"16px 14px",display:"flex",alignItems:"center",gap:6}} onClick={speech.stop}><IcStop size={14}/> Stop</button>}
+        <button style={{flex:1,background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"16px",opacity:transcript.trim()?1:0.3}} onClick={submit} disabled={!transcript.trim()}>Add to Log →</button>
       </div>
     </div>
   </div>;
@@ -706,7 +707,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
   return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column"}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 8px) 16px 8px",flexShrink:0}}>
       <button style={{width:40,height:40,borderRadius:11,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{speech.stop();onBack();}}><IcBack/></button>
-      <span style={{fontSize:16,fontWeight:700,color:C.text}}>Add Meal Photo</span>
+      <span style={{fontSize:16,fontWeight:500,color:C.text}}>Add Meal Photo</span>
       <div style={{width:40}}/>
     </div>
     {imagePreview&&<div style={{flex:1,minHeight:0,padding:"0 16px 8px"}}>
@@ -725,13 +726,13 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
           }
         </div>
       )}
-      <textarea style={{width:"100%",height:68,background:C.surface,border:`1px solid ${note?C.aMid:C.border}`,borderRadius:12,color:note?C.text:C.sub,fontSize:13,padding:"10px 14px",resize:"none",outline:"none",fontFamily:"'Plus Jakarta Sans',sans-serif",lineHeight:1.55}}
+      <textarea style={{width:"100%",height:68,background:C.surface,border:`1px solid ${note?C.aMid:C.border}`,borderRadius:12,color:note?C.text:C.sub,fontSize:13,padding:"10px 14px",resize:"none",outline:"none",fontFamily:"'Inter',sans-serif",lineHeight:1.55}}
         placeholder="Add notes (optional) — ingredients, portions, brand…"
         value={note} onChange={e=>setNote(e.target.value)}/>
       {error&&<div style={{background:C.rDim,border:`1px solid ${C.rMid}`,borderRadius:12,padding:"12px 14px",marginBottom:2}}>
         <p style={{color:C.red,fontSize:13,fontWeight:600,lineHeight:1.5}}>⚠ {error}</p>
       </div>}
-      <button style={{width:"100%",background:C.accent,border:"none",borderRadius:13,color:C.bg,fontSize:15,fontWeight:700,padding:"14px"}} onClick={submit}>
+      <button style={{width:"100%",background:C.accent,border:"none",borderRadius:13,color:C.bg,fontSize:15,fontWeight:500,padding:"14px"}} onClick={submit}>
         {error?"Retry →":"Analyze & Add →"}
       </button>
     </div>
@@ -746,14 +747,14 @@ function SwipeIngRow({ing,idx,editIdx,ingVal,setIngVal,setEditIdx,commitIng,onDe
   const onTE=()=>{if(swipeX<=-THRESHOLD)onDelete(idx);else{setSwipeX(0);setSwiping(false);}};
   return <div style={{position:"relative",overflow:"hidden",borderTop:`1px solid ${C.border}`}}>
     <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:16}}>
-      <span style={{color:"#fff",fontSize:12,fontWeight:700,marginRight:4}}>Delete</span><IcTrash/>
+      <span style={{color:"#fff",fontSize:12,fontWeight:400,marginRight:4}}>Delete</span><IcTrash/>
     </div>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 16px",background:C.surface,transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
       onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
-      <span style={{fontSize:14,color:C.text,flex:1}}>{ing.name}</span>
+      <span style={{fontSize:14,fontWeight:300,color:C.text,flex:1}}>{ing.name}</span>
       {editIdx===idx
-        ?<input autoFocus type="number" inputMode="numeric" style={{width:70,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:14,fontWeight:600,textAlign:"right",outline:"none",fontFamily:"'Plus Jakarta Sans',sans-serif"}} value={ingVal} onChange={e=>setIngVal(e.target.value)} onBlur={()=>commitIng(idx)} onKeyDown={e=>e.key==="Enter"&&commitIng(idx)}/>
-        :<div style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:C.sub}} onClick={()=>{setEditIdx(idx);setIngVal(String(ing.calories));}}><span style={{fontSize:13,fontWeight:600}}>{ing.calories} kcal{ing.proteinG?` · ${ing.proteinG}g`:""}</span><IcEdit/></div>
+        ?<input autoFocus type="number" inputMode="numeric" style={{width:70,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:14,fontWeight:600,textAlign:"right",outline:"none",fontFamily:"'Inter',sans-serif"}} value={ingVal} onChange={e=>setIngVal(e.target.value)} onBlur={()=>commitIng(idx)} onKeyDown={e=>e.key==="Enter"&&commitIng(idx)}/>
+        :<div style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:C.sub}} onClick={()=>{setEditIdx(idx);setIngVal(String(ing.calories));}}><span style={{fontSize:13,fontWeight:300}}>{ing.calories} kcal{ing.proteinG?` · ${ing.proteinG}g`:""}</span><IcEdit/></div>
       }
     </div>
   </div>;
@@ -800,33 +801,33 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
   return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 12px) 16px 12px"}}>
       <button style={{width:44,height:44,borderRadius:12,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onBack}><IcBack/></button>
-      <span style={{fontSize:16,fontWeight:700,color:C.text}}>{isWorkout?"Workout":"Meal Details"}</span>
+      <span style={{fontSize:16,fontWeight:500,color:C.text}}>{isWorkout?"Workout":"Meal Details"}</span>
       <button style={{width:44,height:44,borderRadius:12,background:C.rDim,border:`1px solid ${C.rMid}`,color:C.red,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>onDelete(meal.id)}><IcTrash/></button>
     </div>
     {!isWorkout&&(meal.imageBase64?<img src={`data:${meal.imageMime||"image/jpeg"};base64,${meal.imageBase64}`} style={{width:"100%",height:250,objectFit:"cover"}} alt=""/>:<div style={{width:"100%",height:180,background:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:56}}>{meal.emoji||"🍽️"}</span></div>)}
     {isWorkout&&<div style={{width:"100%",height:140,background:C.oDim,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:64}}>🔥</span></div>}
     <div style={{padding:"20px 20px 40px"}}>
-      <h2 style={{fontSize:22,fontWeight:800,color:isWorkout?C.orange:C.text,marginBottom:6,letterSpacing:"-0.5px"}}>{meal.mealTitle}</h2>
-      <p style={{fontSize:13,color:C.sub,lineHeight:1.6,marginBottom:5}}>{meal.summary}</p>
+      <h2 style={{fontSize:22,fontWeight:400,color:isWorkout?C.orange:C.text,marginBottom:6,letterSpacing:"-0.3px"}}>{meal.mealTitle}</h2>
+      <p style={{fontSize:13,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:5}}>{meal.summary}</p>
       <p style={{fontSize:11,color:C.dim,marginBottom:20}}>{meal.time}</p>
       <div style={{display:"flex",gap:10,marginBottom:18}}>
         <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",background:isWorkout?C.oDim:C.aDim,border:`1px solid ${isWorkout?C.oMid:C.aMid}`,borderRadius:16,cursor:"pointer"}} onClick={()=>{setTotalVal(String(meal.totalCalories));setEditTotal(true);}}>
-          <span style={{fontSize:13,fontWeight:700,color:C.text}}>{isWorkout?"Calories Burned":"Calories"}</span>
+          <span style={{fontSize:13,fontWeight:400,color:C.text}}>{isWorkout?"Calories Burned":"Calories"}</span>
           {editTotal
-            ?<input autoFocus type="number" inputMode="numeric" style={{width:80,background:"transparent",border:"none",borderBottom:`2px solid ${isWorkout?C.orange:C.accent}`,color:isWorkout?C.orange:C.accent,fontSize:26,fontWeight:800,fontFamily:"'Plus Jakarta Sans',sans-serif",outline:"none",textAlign:"right"}} value={totalVal} onChange={e=>setTotalVal(e.target.value)} onBlur={commitTotal} onKeyDown={e=>e.key==="Enter"&&commitTotal()} onClick={e=>e.stopPropagation()}/>
-            :<div style={{display:"flex",alignItems:"center",gap:5,color:isWorkout?C.orange:C.accent}}><span style={{fontSize:26,fontWeight:800,letterSpacing:"-1px"}}>{meal.totalCalories}</span><span style={{fontSize:11,opacity:0.7}}>kcal</span><IcEdit size={13}/></div>
+            ?<input autoFocus type="number" inputMode="numeric" style={{width:80,background:"transparent",border:"none",borderBottom:`2px solid ${isWorkout?C.orange:C.accent}`,color:isWorkout?C.orange:C.accent,fontSize:26,fontWeight:200,fontFamily:"'Inter',sans-serif",outline:"none",textAlign:"right"}} value={totalVal} onChange={e=>setTotalVal(e.target.value)} onBlur={commitTotal} onKeyDown={e=>e.key==="Enter"&&commitTotal()} onClick={e=>e.stopPropagation()}/>
+            :<div style={{display:"flex",alignItems:"center",gap:5,color:isWorkout?C.orange:C.accent}}><span style={{fontSize:26,fontWeight:200,letterSpacing:"-1.5px"}}>{meal.totalCalories}</span><span style={{fontSize:11,opacity:0.7}}>kcal</span><IcEdit size={13}/></div>
           }
         </div>
         {!isWorkout&&(meal.totalProteinG||0)>0&&<div style={{padding:"16px 14px",background:"rgba(96,200,245,0.1)",border:"1px solid rgba(96,200,245,0.3)",borderRadius:16,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minWidth:72}}>
-          <span style={{fontSize:20,fontWeight:800,color:"#60C8F5",letterSpacing:"-0.5px"}}>{Math.round(meal.totalProteinG||0)}g</span>
+          <span style={{fontSize:20,fontWeight:200,color:"#60C8F5",letterSpacing:"-0.5px"}}>{Math.round(meal.totalProteinG||0)}g</span>
           <span style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:1}}>protein</span>
         </div>}
       </div>
 
       {!isWorkout&&<div style={{background:C.surface,borderRadius:16,border:`1px solid ${C.border}`,overflow:"hidden",marginBottom:12}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px 8px"}}>
-          <p style={{fontSize:11,fontWeight:700,color:C.sub,textTransform:"uppercase",letterSpacing:"1px"}}>Breakdown</p>
-          {!addingVoice&&<button style={{display:"flex",alignItems:"center",gap:5,background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:8,color:C.accent,fontSize:11,fontWeight:700,padding:"5px 10px"}} onClick={()=>{setAddingVoice(true);setAddTranscript("");setAddError("");setTimeout(()=>speech.start(),100);}}>
+          <p style={{fontSize:11,fontWeight:400,color:C.sub,textTransform:"uppercase",letterSpacing:"1.2px"}}>Breakdown</p>
+          {!addingVoice&&<button style={{display:"flex",alignItems:"center",gap:5,background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:8,color:C.accent,fontSize:11,fontWeight:500,padding:"5px 10px"}} onClick={()=>{setAddingVoice(true);setAddTranscript("");setAddError("");setTimeout(()=>speech.start(),100);}}>
             <IcMic size={12}/> Add item
           </button>}
         </div>
@@ -843,13 +844,13 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
               :<span style={{flex:1,fontSize:12,color:C.sub}}>Tap mic or type what to add</span>
             }
           </div>
-          <textarea style={{width:"100%",height:60,background:C.hover,border:`1px solid ${addTranscript?C.aMid:C.border}`,borderRadius:10,color:addTranscript?C.text:C.sub,fontSize:13,padding:"8px 12px",resize:"none",outline:"none",fontFamily:"'Plus Jakarta Sans',sans-serif",lineHeight:1.5,marginBottom:8}}
+          <textarea style={{width:"100%",height:60,background:C.hover,border:`1px solid ${addTranscript?C.aMid:C.border}`,borderRadius:10,color:addTranscript?C.text:C.sub,fontSize:13,padding:"8px 12px",resize:"none",outline:"none",fontFamily:"'Inter',sans-serif",lineHeight:1.5,marginBottom:8}}
             placeholder="e.g. half tablespoon of butter…"
             value={addTranscript} onChange={e=>setAddTranscript(e.target.value)}/>
           {addError&&<p style={{color:C.red,fontSize:12,marginBottom:6}}>{addError}</p>}
           <div style={{display:"flex",gap:8}}>
             <button style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,borderRadius:10,color:C.sub,fontSize:13,fontWeight:600,padding:"10px"}} onClick={()=>{speech.stop();setAddingVoice(false);setAddTranscript("");setAddError("");}}>Cancel</button>
-            <button style={{flex:2,background:addLoading?"transparent":C.accent,border:addLoading?`1px solid ${C.aMid}`:"none",borderRadius:10,color:addLoading?C.accent:C.bg,fontSize:13,fontWeight:700,padding:"10px",opacity:addTranscript.trim()?1:0.35}} onClick={mergeItems} disabled={!addTranscript.trim()||addLoading}>
+            <button style={{flex:2,background:addLoading?"transparent":C.accent,border:addLoading?`1px solid ${C.aMid}`:"none",borderRadius:10,color:addLoading?C.accent:C.bg,fontSize:13,fontWeight:500,padding:"10px",opacity:addTranscript.trim()?1:0.35}} onClick={mergeItems} disabled={!addTranscript.trim()||addLoading}>
               {addLoading?"Calculating…":"Add to meal →"}
             </button>
           </div>
