@@ -5,23 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="Just Calories"/>
-<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;Just Calories&quot;,&quot;short_name&quot;:&quot;Just Calories&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;%230A0A0F&quot;,&quot;theme_color&quot;:&quot;%230A0A0F&quot;}"/>
 <meta name="theme-color" content="#0A0A0F"/>
 <title>Just Calories</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,200;14..32,300;14..32,400;14..32,500&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,200;14..32,300;14..32,400;14..32,500;14..32,600&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;background:#0A0A0F;font-family:'Inter',sans-serif;overflow:hidden}
+html,body{height:100%;background:#0A0A0F;font-family:'Inter',system-ui,sans-serif;overflow:hidden}
 #root{height:100%;overflow:hidden}
 ::-webkit-scrollbar{width:0}
 @keyframes spin{to{transform:rotate(360deg)}}
-@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
-@keyframes ripple{0%{box-shadow:0 0 0 0 rgba(255,68,68,0.4)}100%{box-shadow:0 0 0 20px rgba(255,68,68,0)}}
-textarea::placeholder{color:rgba(240,240,248,0.28);font-family:'Inter',sans-serif;font-size:13px}
-input::placeholder{color:rgba(240,240,248,0.3)}
+@keyframes widgetIn{from{opacity:0;transform:translateY(12px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+textarea::placeholder,input::placeholder{color:rgba(240,240,248,0.28);font-family:'Inter',sans-serif}
 button{font-family:'Inter',sans-serif;cursor:pointer}
 </style>
 </head>
@@ -31,31 +27,16 @@ button{font-family:'Inter',sans-serif;cursor:pointer}
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel">
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
+// ─── STORAGE ──────────────────────────────────────────────────────────────────
 const ls = {
   get: k => { try { return localStorage.getItem(k); } catch { return null; } },
-  set: (k,v) => { try { localStorage.setItem(k,v); return true; } catch(e) { console.warn("localStorage write failed:",e); return false; } }
+  set: (k,v) => { try { localStorage.setItem(k,v); return true; } catch { return false; } }
 };
-
-// Downscale a full base64 image to a tiny thumbnail for localStorage.
-// Keeps stored size ~4-8KB vs 500KB+ for full photos — avoids QuotaExceededError.
-function makeThumbnail(base64, mimeType, size=120, quality=0.7) {
-  return new Promise(resolve => {
-    try {
-      const img = new Image();
-      img.onload = () => {
-        const s = Math.min(size/img.width, size/img.height, 1);
-        const w = Math.round(img.width*s), h = Math.round(img.height*s);
-        const c = document.createElement("canvas"); c.width=w; c.height=h;
-        c.getContext("2d").drawImage(img,0,0,w,h);
-        resolve(c.toDataURL("image/jpeg", quality).split(",")[1]);
-      };
-      img.onerror = () => resolve(null);
-      img.src = `data:${mimeType};base64,${base64}`;
-    } catch { resolve(null); }
-  });
-}
+const fmtKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const fmtDisplay = d => d.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+const isToday = d => fmtKey(d) === fmtKey(new Date());
 const loadMeals = d => { try { return JSON.parse(ls.get(`jct:m:${d}`) || "[]"); } catch { return []; } };
 const saveMeals = (d,m) => ls.set(`jct:m:${d}`, JSON.stringify(m));
 const loadBaseGoal = () => parseInt(ls.get("jct:basegoal") || "1600");
@@ -64,861 +45,1278 @@ const loadKey = () => ls.get("jct:apikey") || "";
 const saveKey = k => ls.set("jct:apikey", k);
 const loadWeights = () => { try { return JSON.parse(ls.get("jct:weights") || "[]"); } catch { return []; } };
 const saveWeights = w => ls.set("jct:weights", JSON.stringify(w));
-const loadWorkoutLabels = () => { try { return JSON.parse(ls.get("jct:wlabels") || "[]"); } catch { return []; } };
-const saveWorkoutLabels = arr => ls.set("jct:wlabels", JSON.stringify(arr));
-const loadFoodHistory = () => { try { return JSON.parse(ls.get("jct:foodhist") || "[]"); } catch { return []; } };
-const saveFoodHistory = arr => ls.set("jct:foodhist", JSON.stringify(arr));
+const loadFoodDB = () => { try { return JSON.parse(ls.get("jct:fooddb") || "{}"); } catch { return {}; } };
+const saveFoodDB = db => ls.set("jct:fooddb", JSON.stringify(db));
+const loadOnboarded = () => ls.get("jct:onboarded") === "1";
+const setOnboarded = () => ls.set("jct:onboarded","1");
 
-const fmtKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-const fmtDisplay = d => d.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
-const isToday = d => fmtKey(d) === fmtKey(new Date());
+// food DB: key = normalized name, value = {calories, proteinG, carbsG, fatG, sugarG, fiberG, servings, lastServings}
+function recordFoodToDB(ing) {
+  if(!ing?.name) return;
+  const db = loadFoodDB();
+  const key = ing.name.toLowerCase().trim();
+  db[key] = {
+    name: ing.name,
+    calories: ing.calories,
+    proteinG: ing.proteinG||0,
+    carbsG: ing.carbsG||0,
+    fatG: ing.fatG||0,
+    sugarG: ing.sugarG||0,
+    fiberG: ing.fiberG||0,
+    servings: ing.servings||1,
+  };
+  saveFoodDB(db);
+}
+function getFoodFromDB(name) {
+  const db = loadFoodDB();
+  return db[name?.toLowerCase()?.trim()] || null;
+}
 
-// ─── FIX 1: Remove temperature param — gpt-5.5 only supports default (1) ─────
-// ─── FIX 2: Use max_completion_tokens (correct param for newer models) ────────
+// ─── WIDGET CONFIG ────────────────────────────────────────────────────────────
+const WIDGET_REGISTRY = [
+  { id:"calorie_ring",   label:"Calorie Ring",       desc:"Circular progress showing calories eaten vs goal" },
+  { id:"macro_bars",     label:"Macro Bars",          desc:"Bars for protein, carbs, fat" },
+  { id:"water_tracker",  label:"Water Tracker",       desc:"Tap cups to log daily water intake" },
+  { id:"weight_widget",  label:"Weight + Trend",      desc:"Log daily weight with trend chart" },
+  { id:"streak_counter", label:"Streak Counter",      desc:"Days logged in a row" },
+  { id:"history_chart",  label:"7-Day History",       desc:"Bar chart of calorie intake over 7 days" },
+  { id:"meal_list",      label:"Meal Log",            desc:"Today's meals — always visible", locked:true },
+];
+const DEFAULT_CONFIG = {
+  visible: ["calorie_ring","weight_widget","meal_list"],
+  order:   ["calorie_ring","weight_widget","meal_list"],
+  options: { macro_bars:{ trackedMacros:["protein","carbs","fat"] } }
+};
+const loadWidgetConfig = () => { try { const s=ls.get("jct:wconfig"); if(s) return JSON.parse(s); } catch {} return DEFAULT_CONFIG; };
+const saveWidgetConfig = c => ls.set("jct:wconfig", JSON.stringify(c));
+
+// ─── COLORS ───────────────────────────────────────────────────────────────────
+const C = {
+  bg:"#0A0A0F", surface:"#13131A", hover:"#1C1C28", card:"#16161F",
+  border:"rgba(255,255,255,0.07)",
+  accent:"#4AE68A", aDim:"rgba(74,230,138,0.1)", aMid:"rgba(74,230,138,0.28)",
+  text:"#F0F0F8", sub:"rgba(240,240,248,0.5)", dim:"rgba(240,240,248,0.22)",
+  red:"#FF4444", rDim:"rgba(255,68,68,0.12)", rMid:"rgba(255,68,68,0.3)",
+  orange:"#FF9500", oDim:"rgba(255,149,0,0.12)", oMid:"rgba(255,149,0,0.3)",
+  blue:"#5AC8FA", bDim:"rgba(90,200,250,0.12)", bMid:"rgba(90,200,250,0.28)",
+  purple:"#BF5AF2", pDim:"rgba(191,90,242,0.12)",
+};
+
+// ─── ICONS ────────────────────────────────────────────────────────────────────
+const Ic = {
+  Camera: ({s=20}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>,
+  Mic: ({s=20}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>,
+  Stop: ({s=16}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>,
+  Left: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>,
+  Right: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>,
+  Back: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>,
+  Trash: ({s=16}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>,
+  Edit: ({s=13}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+  Gear: ({s=18}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+  Sparkles: ({s=16}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3L13.5 8.5L19 10L13.5 11.5L12 17L10.5 11.5L5 10L10.5 8.5L12 3z"/><path d="M19 3L19.75 5.25L22 6L19.75 6.75L19 9L18.25 6.75L16 6L18.25 5.25L19 3z"/><path d="M5 17L5.5 18.5L7 19L5.5 19.5L5 21L4.5 19.5L3 19L4.5 18.5L5 17z"/></svg>,
+  Fire: ({s=20}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22C6.5 22 2 17.5 2 12c0-4 2.5-7.5 6-9.5C7.5 4.5 8 7 8 8c1-2 2.5-4 4.5-5 0 2 .5 4 2 5.5 1-1.5 1.5-3 1.5-5 2.5 2 4 5 4 8.5 0 5.5-4.5 10-8 10z"/></svg>,
+  Plus: ({s=18}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  ChevronRight: ({s=16}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>,
+  Scale: ({s=18}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3L4 9l8 6 8-6z"/><path d="M4 9v7a8 8 0 0 0 16 0V9"/><line x1="12" y1="15" x2="12" y2="22"/></svg>,
+};
+
+// ─── AI ──────────────────────────────────────────────────────────────────────
 async function analyze(apiKey, imageData, description) {
-  if (!apiKey) throw new Error("No API key — tap ⚙️ Settings to add your OpenAI key");
-
-  const sysPrompt = `You are an expert nutritionist and food label reader with access to USDA databases, restaurant nutrition facts, and packaged food data.
-
-BARCODE & PACKAGING:
-- If you see a barcode, UPC, or food package: read ALL visible text including brand name, product name, flavor, size, and any nutrition panel. Use the EXACT published nutrition facts for that specific product.
-- Examples: Fairlife 2% milk 11.5oz = 170cal/13g protein. Premier Protein shake = 160cal/30g protein. Kind bar peanut butter = 200cal/7g protein.
-
-RESTAURANT & BRAND FOOD:
-- Use real published nutrition data. Examples: Big Mac = 550cal/25g protein. Chipotle chicken burrito bowl (standard) ~800cal/50g protein. Starbucks grande latte whole milk = 220cal/12g protein.
-
-HOMEMADE / PLATED FOOD:
-- Estimate the ACTUAL portion size visible in the photo. Look for visual cues: plate size, utensils, food density.
-- Never default to a "standard serving" — judge what's actually in the image.
-
-QUANTITIES:
-- If user says "two", "3x", "a dozen" etc, multiply all values by that number.
-
-ACCURACY RULES:
-- Never return 0 calories for any real food item.
-- totalCalories MUST equal the sum of all ingredient calories.
-- Estimate totalProteinG and proteinG for every ingredient.
-- For emoji: pick ONE emoji that best represents the main food item.
-- Return ONLY raw JSON. No markdown fences, no explanation text, nothing else.`;
-
+  if (!apiKey) throw new Error("No API key — go to Settings");
   const userPrompt = imageData
-    ? `Analyze this image carefully.${description ? ` User added: "${description}".` : ""} If you see a barcode or package, identify the exact product and use its real nutrition facts. Return this exact JSON: {"mealTitle":"...","totalCalories":0,"totalProteinG":0,"emoji":"🍔","ingredients":[{"name":"...","calories":0,"proteinG":0}],"summary":"..."}`
-    : `The user described their meal: "${description}". Use real brand/USDA data and multiply by any stated quantity. Return this exact JSON: {"mealTitle":"...","totalCalories":0,"totalProteinG":0,"emoji":"🍔","ingredients":[{"name":"...","calories":0,"proteinG":0}],"summary":"..."}`;
+    ? `Analyze this food image.${description?` Note: "${description}".`:""} Return JSON only: {"mealTitle":"...","totalCalories":0,"totalProteinG":0,"totalCarbsG":0,"totalFatG":0,"totalSugarG":0,"totalFiberG":0,"emoji":"🍔","ingredients":[{"name":"...","calories":0,"proteinG":0,"carbsG":0,"fatG":0,"sugarG":0,"fiberG":0,"servings":1}],"summary":"..."}`
+    : `Analyze: "${description}". Return JSON only: {"mealTitle":"...","totalCalories":0,"totalProteinG":0,"totalCarbsG":0,"totalFatG":0,"totalSugarG":0,"totalFiberG":0,"emoji":"🍔","ingredients":[{"name":"...","calories":0,"proteinG":0,"carbsG":0,"fatG":0,"sugarG":0,"fiberG":0,"servings":1}],"summary":"..."}
 
+IMPORTANT for servings: "servings" must reflect the actual count/quantity the person consumed. Examples:
+- "2 eggs" → name:"Egg", servings:2, calories=calories for 2 eggs total
+- "3 strips of bacon" → name:"Bacon strip", servings:3, calories=calories for 3 strips total  
+- "1 cup oatmeal" → name:"Oatmeal", servings:1, calories=calories for 1 cup
+- "half a bagel" → name:"Bagel", servings:0.5, calories=calories for half
+The calories/macros in the ingredient must be the TOTAL for that serving count, not per-unit.`;
   const contentArr = [];
-  if (imageData) {
-    contentArr.push({
-      type: "image_url",
-      image_url: { url: `data:${imageData.mimeType};base64,${imageData.base64}`, detail: "high" }
-    });
-  }
-  contentArr.push({ type: "text", text: userPrompt });
-
+  if (imageData) contentArr.push({ type:"image_url", image_url:{ url:`data:${imageData.mimeType};base64,${imageData.base64}`, detail:"high" }});
+  contentArr.push({ type:"text", text:userPrompt });
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "gpt-5.5",
-      messages: [
-        { role: "system", content: sysPrompt },
-        { role: "user", content: contentArr }
-      ],
-      max_completion_tokens: 800
-      // temperature intentionally omitted — gpt-5.5 only supports the default value of 1
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
+    body:JSON.stringify({ model:"gpt-4.5-preview", messages:[{role:"system",content:"You are an expert nutritionist. Return ONLY raw JSON. For each ingredient include servings (default 1)."},{role:"user",content:contentArr}], max_tokens:1000 })
+  });
+  if (!res.ok) { let m=`API error ${res.status}`; try{const e=await res.json();m=e.error?.message||m;}catch{} if(res.status===401)throw new Error("Invalid API key"); if(res.status===429)throw new Error("Rate limited"); throw new Error(m); }
+  const data = await res.json();
+  const raw = (data.choices?.[0]?.message?.content||"").trim().replace(/```json\s*/gi,"").replace(/```/g,"").trim();
+  try{return JSON.parse(raw);}catch{const m=raw.match(/\{[\s\S]*\}/);if(m)return JSON.parse(m[0]);throw new Error("Unexpected response");}
+}
+
+// Merge known food DB data into freshly analyzed ingredients
+function mergeWithFoodDB(ingredients) {
+  return (ingredients||[]).map(ing => {
+    const known = getFoodFromDB(ing.name);
+    if (known) {
+      return { ...ing, ...known, name: ing.name, servings: known.servings || ing.servings || 1 };
+    }
+    return { ...ing, servings: ing.servings || 1 };
+  });
+}
+
+async function aiChat(apiKey, widgetConfig, messages, userMsg) {
+  // Uses Claude via Anthropic API (no key needed for config changes)
+  // For general chat we use Claude; for analyze we use OpenAI
+  const regDesc = WIDGET_REGISTRY.map(w=>`- ${w.id}: "${w.label}" — ${w.desc}`).join("\n");
+  const sys = `You are an AI assistant inside a calorie tracking app called "Just Calories". You can help with:
+1. Customizing the app layout (adding/removing widgets)
+2. Answering nutrition questions
+3. Logging food (return a special JSON block)
+4. General health/calorie questions
+
+AVAILABLE WIDGETS:\n${regDesc}
+CURRENT CONFIG:\n${JSON.stringify(widgetConfig,null,2)}
+
+When the user wants to customize layout, return JSON: {"type":"config","reply":"...", "configChanges":{"visible":[...],"order":[...]}}
+When the user wants to log food, return JSON: {"type":"log_food","reply":"...","food":{"mealTitle":"...","totalCalories":0,"totalProteinG":0,"totalCarbsG":0,"totalFatG":0,"ingredients":[{"name":"...","calories":0,"proteinG":0,"carbsG":0,"fatG":0,"servings":1}]}}
+Otherwise return: {"type":"chat","reply":"..."}
+
+Rules for config:
+- meal_list always stays in visible/order
+- Keep existing visible widgets unless user says remove
+
+Always respond in JSON only.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages",{
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "anthropic-dangerous-direct-browser-access":"true",
+      "anthropic-version":"2023-06-01",
+    },
+    body:JSON.stringify({
+      model:"claude-sonnet-4-20250514",
+      max_tokens:800,
+      system:sys,
+      messages:[...messages.filter(m=>m.role!=="system").map(m=>({role:m.role==="ai"?"assistant":"user",content:m.text})),{role:"user",content:userMsg}]
     })
   });
-
-  if (!res.ok) {
-    let msg = `API error ${res.status}`;
-    try { const e = await res.json(); msg = e.error?.message || msg; } catch {}
-    if (res.status === 401) throw new Error("Invalid API key — tap ⚙️ to update it");
-    if (res.status === 400) throw new Error(`Bad request: ${msg}`);
-    if (res.status === 429) throw new Error("Rate limit — wait a moment and try again");
-    throw new Error(msg);
-  }
-
   const data = await res.json();
-  const rawText = data.choices?.[0]?.message?.content || "";
-  const cleaned = rawText.trim().replace(/```json\s*/gi,"").replace(/```/g,"").trim();
-  try { return JSON.parse(cleaned); }
-  catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error("Unexpected response — please try again");
-  }
+  const raw = (data.content?.[0]?.text||"{}").trim().replace(/```json\s*/gi,"").replace(/```/g,"").trim();
+  try{return JSON.parse(raw);}catch{const m=raw.match(/\{[\s\S]*\}/);if(m)return JSON.parse(m[0]);return{type:"chat",reply:"I'm here to help! Ask me anything about your nutrition or app layout."};}
 }
 
-function recordFoodItems(ingredients) {
-  if (!ingredients?.length) return;
-  const existing = loadFoodHistory();
-  const map = {};
-  existing.forEach(f => { map[f.name.toLowerCase()] = f; });
-  ingredients.forEach(f => { map[f.name.toLowerCase()] = {name:f.name,calories:f.calories,proteinG:f.proteinG||0}; });
-  saveFoodHistory(Object.values(map).slice(0,100));
-}
-
+// ─── UTILS ────────────────────────────────────────────────────────────────────
 let _id = Date.now();
 const uid = () => `m${++_id}`;
 
-const C = {
-  bg:"#0A0A0F", surface:"#13131A", hover:"#1C1C28", card:"#16161F",
-  border:"rgba(255,255,255,0.06)",
-  accent:"#4AE68A", aDim:"rgba(74,230,138,0.12)", aMid:"rgba(74,230,138,0.35)",
-  text:"#F0F0F8", sub:"rgba(240,240,248,0.5)", dim:"rgba(240,240,248,0.22)",
-  red:"#FF4444", rDim:"rgba(255,68,68,0.14)", rMid:"rgba(255,68,68,0.35)",
-  orange:"#FF9500", oDim:"rgba(255,149,0,0.14)", oMid:"rgba(255,149,0,0.35)"
-};
+function makeThumbnail(base64,mimeType,size=120,quality=0.7) {
+  return new Promise(resolve=>{
+    try{const img=new Image();img.onload=()=>{const s=Math.min(size/img.width,size/img.height,1);const w=Math.round(img.width*s),h=Math.round(img.height*s);const c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);resolve(c.toDataURL("image/jpeg",quality).split(",")[1]);};img.onerror=()=>resolve(null);img.src=`data:${mimeType};base64,${base64}`;}catch{resolve(null);}
+  });
+}
 
-const IcCamera = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>;
-const IcMic = ({size=22}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>;
-const IcStop = ({size=18}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>;
-const IcLeft = () => <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
-const IcRight = () => <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>;
-const IcEdit = ({size=13}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>;
-const IcBack = () => <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
-const IcTrash = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>;
-const IcGear = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>;
+// Module-level flag — survives component unmount/remount across the session
+let _micPermissionGranted = false;
+async function ensureMicPermission() {
+  if(_micPermissionGranted) return;
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({audio:true});
+    s.getTracks().forEach(t=>t.stop());
+    _micPermissionGranted = true;
+  } catch(e) {
+    // permission denied or unavailable — SpeechRecognition will handle it
+  }
+}
 
+function useWebSpeech(onUpdate) {
+  const recRef=useRef(null);
+  const [listening,setListening]=useState(false);
+  const supported=!!(window.SpeechRecognition||window.webkitSpeechRecognition);
+  const start=useCallback(async()=>{
+    if(!supported)return;
+    await ensureMicPermission();
+    try{
+      const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+      const rec=new SR();recRef.current=rec;
+      rec.continuous=true;rec.interimResults=true;rec.lang="en-US";
+      let final="";
+      rec.onresult=e=>{let interim="";for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)final+=t+" ";else interim=t;}onUpdate(final+interim);};
+      rec.onerror=()=>setListening(false);
+      rec.onend=()=>setListening(false);
+      rec.start();setListening(true);
+    }catch{setListening(false);}
+  },[supported,onUpdate]);
+  const stop=useCallback(()=>{try{recRef.current?.stop();}catch{}setListening(false);},[]);
+  return{listening,supported,start,stop};
+}
+
+// ─── SHARED UI ────────────────────────────────────────────────────────────────
 function Spinner({text}) {
   return <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:20,background:C.bg}}>
-    <div style={{width:44,height:44,border:`3px solid ${C.border}`,borderTop:`3px solid ${C.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
-    <p style={{fontSize:16,fontWeight:500,color:C.text}}>{text}</p>
+    <div style={{width:40,height:40,border:`2.5px solid ${C.border}`,borderTop:`2.5px solid ${C.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+    <p style={{fontSize:15,fontWeight:300,color:C.sub}}>{text}</p>
+  </div>;
+}
+function Card({children,style={},onClick}) {
+  return <div onClick={onClick} style={{background:C.surface,borderRadius:16,border:`1px solid ${C.border}`,overflow:"hidden",...style}}>{children}</div>;
+}
+
+// Safe-area top padding
+const SAT = "calc(env(safe-area-inset-top,44px) + 8px)";
+const SAB = "calc(env(safe-area-inset-bottom,16px) + 8px)";
+
+// Standard top header (thumb-safe)
+function TopBar({title, onBack, rightEl}) {
+  return <div style={{
+    padding:`${SAT} 16px 10px`,
+    background:C.surface,
+    borderBottom:`1px solid ${C.border}`,
+    flexShrink:0,
+    display:"flex",
+    alignItems:"center",
+    gap:10,
+  }}>
+    {onBack && <button onClick={onBack} style={{width:40,height:40,borderRadius:12,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ic.Back/></button>}
+    <span style={{flex:1,fontSize:15,fontWeight:400,color:C.text}}>{title}</span>
+    {rightEl}
   </div>;
 }
 
-// ─── FIX 3: VoiceVisualizer no longer calls getUserMedia itself ───────────────
-// Accepts mediaStream prop from parent. If no stream given, renders animated
-// placeholder bars — zero extra permission prompts.
-function VoiceVisualizer({active, mediaStream}) {
-  const canvasRef = useRef(null);
-  const rafRef = useRef(null);
-  const acRef = useRef(null);
-  const BARS = 24;
+// ─── AI FLOATING BUTTON + DRAWER ─────────────────────────────────────────────
+function AIDrawer({apiKey, widgetConfig, onConfigChange, onAddMeal, onClose}) {
+  const [msgs,setMsgs]=useState([{role:"ai",text:"Hi! I can help you customize your layout, log food, or answer nutrition questions. What would you like to do?"}]);
+  const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const chatRef=useRef();
+  const speech=useWebSpeech(useCallback(t=>setInput(t),[]));
+  useEffect(()=>{if(chatRef.current)chatRef.current.scrollTop=chatRef.current.scrollHeight;},[msgs]);
 
-  useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-
-    const flat = () => {
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      const bw = canvas.width/BARS;
-      ctx.fillStyle = "rgba(74,230,138,0.18)";
-      for(let i=0;i<BARS;i++){
-        const h=4;
-        ctx.beginPath();
-        ctx.roundRect(i*bw+1,(canvas.height-h)/2,bw-2,h,2);
-        ctx.fill();
+  const send = async() => {
+    const msg=input.trim();if(!msg)return;
+    speech.stop();setInput("");
+    const newMsgs=[...msgs,{role:"user",text:msg}];
+    setMsgs(newMsgs);
+    setLoading(true);
+    try{
+      const result = await aiChat(apiKey, widgetConfig, msgs, msg);
+      if(result.type==="config" && result.configChanges){
+        const next={...widgetConfig,...result.configChanges,options:{...widgetConfig.options,...(result.configChanges.options||{})}};
+        if(!next.visible.includes("meal_list"))next.visible.push("meal_list");
+        if(!next.order.includes("meal_list"))next.order.push("meal_list");
+        onConfigChange(next);
       }
-    };
-
-    if (!active) {
-      cancelAnimationFrame(rafRef.current);
-      try{acRef.current?.close();acRef.current=null;}catch{}
-      flat();
-      return;
+      if(result.type==="log_food" && result.food && onAddMeal){
+        const now=new Date();
+        const ings = mergeWithFoodDB(result.food.ingredients||[]);
+        onAddMeal({
+          id:uid(), mealTitle:result.food.mealTitle, totalCalories:result.food.totalCalories,
+          totalProteinG:result.food.totalProteinG||0, totalCarbsG:result.food.totalCarbsG||0,
+          totalFatG:result.food.totalFatG||0, totalSugarG:0, totalFiberG:0,
+          ingredients:ings, summary:"Added via AI", imageBase64:null,
+          time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
+          addedAt:now.getTime(), emoji:"🤖"
+        });
+      }
+      setMsgs([...newMsgs,{role:"ai",text:result.reply||"Done!"}]);
+    }catch(e){
+      setMsgs([...newMsgs,{role:"ai",text:`Sorry, couldn't connect. ${e.message||""}`}]);
     }
+    setLoading(false);
+  };
 
-    // No real stream — animate fake bars, no mic permission needed
-    if (!mediaStream) {
-      let t = 0;
-      const animate = () => {
-        rafRef.current = requestAnimationFrame(animate);
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        const bw=canvas.width/BARS, maxH=canvas.height*0.88;
-        for(let i=0;i<BARS;i++){
-          const v=Math.abs(Math.sin(t*2.1+i*0.4))*0.55+0.12;
-          const h=Math.max(4,v*maxH);
-          ctx.fillStyle=`rgba(74,230,138,${0.22+v*0.55})`;
-          ctx.beginPath();
-          ctx.roundRect(i*bw+1,(canvas.height-h)/2,bw-2,h,3);
-          ctx.fill();
-        }
-        t+=0.05;
-      };
-      animate();
-      return () => cancelAnimationFrame(rafRef.current);
-    }
-
-    // Real stream — attach analyser for genuine waveform
-    try {
-      const ac = new(window.AudioContext||window.webkitAudioContext)();
-      acRef.current = ac;
-      const src = ac.createMediaStreamSource(mediaStream);
-      const an = ac.createAnalyser(); an.fftSize=64; src.connect(an);
-      const buf = new Uint8Array(an.frequencyBinCount);
-      const draw = () => {
-        rafRef.current = requestAnimationFrame(draw);
-        an.getByteFrequencyData(buf);
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        const bw=canvas.width/BARS,maxH=canvas.height*0.88;
-        for(let i=0;i<BARS;i++){
-          const v=buf[Math.floor(i*buf.length/BARS)]/255;
-          const h=Math.max(4,v*maxH);
-          ctx.fillStyle=`rgba(74,230,138,${0.3+v*0.7})`;
-          ctx.beginPath();
-          ctx.roundRect(i*bw+1,(canvas.height-h)/2,bw-2,h,3);
-          ctx.fill();
-        }
-      };
-      draw();
-    } catch { flat(); }
-
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      try{acRef.current?.close();acRef.current=null;}catch{}
-    };
-  }, [active, mediaStream]);
-
-  return <div style={{width:"100%",height:52,display:"flex",alignItems:"center"}}>
-    <canvas ref={canvasRef} width={340} height={52} style={{width:"100%",height:"100%",opacity:active?1:0.3,transition:"opacity 0.3s"}}/>
+  return <div style={{position:"fixed",inset:0,zIndex:500,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+    <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.5)"}} onClick={onClose}/>
+    <div style={{position:"relative",background:C.surface,borderRadius:"24px 24px 0 0",border:`1px solid ${C.border}`,borderBottom:"none",display:"flex",flexDirection:"column",maxHeight:"80vh"}}>
+      <div style={{padding:"12px 16px 8px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:28,height:28,borderRadius:"50%",background:C.aDim,border:`1px solid ${C.aMid}`,display:"flex",alignItems:"center",justifyContent:"center"}}><Ic.Sparkles s={13}/></div>
+          <span style={{fontSize:14,fontWeight:500,color:C.text}}>AI Assistant</span>
+        </div>
+        <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:20,lineHeight:1,padding:"4px 8px"}}>×</button>
+      </div>
+      <div ref={chatRef} style={{flex:1,overflowY:"auto",padding:"12px 16px",display:"flex",flexDirection:"column",gap:10,minHeight:200}}>
+        {msgs.map((m,i)=>(
+          <div key={i} style={{display:"flex",flexDirection:m.role==="user"?"row-reverse":"row",gap:8,alignItems:"flex-end"}}>
+            {m.role==="ai"&&<div style={{width:22,height:22,borderRadius:"50%",background:C.aDim,border:`1px solid ${C.aMid}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ic.Sparkles s={11}/></div>}
+            <div style={{maxWidth:"80%",padding:"9px 12px",borderRadius:14,background:m.role==="user"?C.accent:C.hover,borderBottomLeftRadius:m.role==="ai"?4:14,borderBottomRightRadius:m.role==="user"?4:14}}>
+              <p style={{fontSize:13,fontWeight:300,lineHeight:1.5,color:m.role==="user"?"#0A0A0F":C.text,whiteSpace:"pre-wrap"}}>{m.text}</p>
+            </div>
+          </div>
+        ))}
+        {loading&&<div style={{display:"flex",gap:6,alignItems:"center"}}><div style={{display:"flex",gap:3}}>{[0,1,2].map(i=><div key={i} style={{width:5,height:5,borderRadius:"50%",background:C.accent,animation:"pulse 1s ease infinite",animationDelay:`${i*.2}s`}}/>)}</div></div>}
+      </div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",padding:"0 16px 8px",flexShrink:0}}>
+        {["Customize my layout","Add a meal","What should I eat?","Show my macros"].map(c=><button key={c} onClick={()=>setInput(c)} style={{background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,padding:"4px 10px",fontSize:11,fontWeight:300,color:C.accent}}>{c}</button>)}
+      </div>
+      <div style={{padding:`8px 16px ${SAB}`,borderTop:`1px solid ${C.border}`,display:"flex",gap:8,alignItems:"flex-end",flexShrink:0}}>
+        <div onClick={speech.listening?speech.stop:speech.start} style={{width:34,height:34,borderRadius:"50%",background:speech.listening?C.rDim:C.aDim,border:`1.5px solid ${speech.listening?C.red:C.aMid}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,color:speech.listening?C.red:C.accent}}>
+          {speech.listening?<Ic.Stop s={11}/>:<Ic.Mic s={14}/>}
+        </div>
+        <textarea style={{flex:1,background:C.hover,border:`1px solid ${input?C.aMid:C.border}`,borderRadius:12,color:C.text,fontSize:14,fontWeight:300,fontFamily:"'Inter',sans-serif",padding:"8px 12px",resize:"none",outline:"none",height:36,maxHeight:80,lineHeight:1.4}}
+          placeholder="Ask me anything…" value={input} onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}/>
+        <button onClick={send} disabled={!input.trim()||loading} style={{width:34,height:34,borderRadius:"50%",background:input.trim()&&!loading?C.accent:C.aDim,border:"none",color:input.trim()&&!loading?"#0A0A0F":C.dim,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16,fontWeight:600}}>↑</button>
+      </div>
+    </div>
   </div>;
 }
 
-function WeightSparkline({data}) {
-  if (data.length<2) return null;
-  const W=120,H=36,P=4,vals=data.map(d=>d.value);
-  const mn=Math.min(...vals),mx=Math.max(...vals),lo=mn-0.5,hi=mx+0.5,range=hi-lo||1;
-  const tx=i=>P+(i/(data.length-1))*(W-P*2),ty=v=>P+(1-(v-lo)/range)*(H-P*2);
+function AIButton({onOpen}) {
+  return <button onClick={onOpen} style={{width:36,height:36,borderRadius:"50%",background:C.aDim,border:`1.5px solid ${C.aMid}`,display:"flex",alignItems:"center",justifyContent:"center",color:C.accent,flexShrink:0}}>
+    <Ic.Sparkles s={15}/>
+  </button>;
+}
+
+// ─── MACRO CONSTANTS ─────────────────────────────────────────────────────────
+const MACRO_COLORS={protein:C.blue,carbs:C.accent,fat:C.orange,sugar:C.red,fiber:C.purple};
+const MACRO_GOALS={protein:150,carbs:200,fat:60,sugar:50,fiber:25};
+const ALL_MACROS = ["proteinG","carbsG","fatG","sugarG","fiberG"];
+const MACRO_LABELS = {proteinG:"Protein",carbsG:"Carbs",fatG:"Fat",sugarG:"Sugar",fiberG:"Fiber"};
+
+// ─── WEIGHT CHART (sparkline, tight range) ───────────────────────────────────
+function WeightSparkline({data, width=110, height=36, color=C.accent}) {
+  if(!data||data.length<2) return <div style={{width,height,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:10,color:C.dim}}>no data</span></div>;
+  const vals=data.map(d=>d.value);
+  // Tight range: min/max with small padding
+  const rawMin=Math.min(...vals), rawMax=Math.max(...vals);
+  const pad=Math.max((rawMax-rawMin)*0.3, 1);
+  const mn=rawMin-pad, mx=rawMax+pad, range=mx-mn;
+  const P=3;
+  const tx=i=>P+(i/Math.max(data.length-1,1))*(width-P*2);
+  const ty=v=>P+(1-(v-mn)/range)*(height-P*2);
   const pts=data.map((d,i)=>`${tx(i)},${ty(d.value)}`).join(" ");
-  const area=`M${tx(0)},${ty(data[0].value)} `+data.slice(1).map((d,i)=>`L${tx(i+1)},${ty(d.value)}`).join(" ")+` L${tx(data.length-1)},${H} L${tx(0)},${H} Z`;
-  const last=data[data.length-1].value,prev=data[data.length-2].value,color=last<=prev?C.accent:C.red;
-  return <svg width={W} height={H} style={{overflow:"visible"}}>
-    <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.3"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>
-    <path d={area} fill="url(#sg)"/>
-    <polyline points={pts} fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-    <circle cx={tx(data.length-1)} cy={ty(last)} r="3" fill={color}/>
+  const trend=data[data.length-1].value<=data[0].value;
+  const lineColor=trend?C.accent:C.red;
+  return <svg width={width} height={height} style={{overflow:"visible",flexShrink:0}}>
+    <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" opacity="0.85"/>
+    <circle cx={tx(data.length-1)} cy={ty(data[data.length-1].value)} r="3" fill={lineColor}/>
   </svg>;
 }
 
-function MealCard({meal,onTap,onQuickEdit,onDelete}) {
-  const [editing,setEditing]=useState(false);
-  const [val,setVal]=useState(String(meal.totalCalories));
-  const [swipeX,setSwipeX]=useState(0);
-  const [swiping,setSwiping]=useState(false);
-  const tx=useRef(0),ty=useRef(0);
-  const isWorkout=meal.type==="workout";
-  const THRESHOLD=80;
-  const commit=()=>{const n=parseInt(val);if(!isNaN(n)&&n>=0)onQuickEdit(meal.id,n);else setVal(String(meal.totalCalories));setEditing(false);};
-  const onTS=e=>{tx.current=e.touches[0].clientX;ty.current=e.touches[0].clientY;setSwiping(false);};
-  const onTM=e=>{const dx=e.touches[0].clientX-tx.current;const dy=Math.abs(e.touches[0].clientY-ty.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<0){setSwiping(true);setSwipeX(Math.max(dx,-(THRESHOLD+30)));}};
-  const onTE=()=>{if(swipeX<=-THRESHOLD){onDelete(meal.id);}else{setSwipeX(0);setSwiping(false);}};
-  return <div style={{position:"relative",marginBottom:10,borderRadius:16,overflow:"hidden"}}>
-    <div style={{position:"absolute",inset:0,background:C.red,borderRadius:16,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:20}}>
-      <span style={{color:"#fff",fontSize:13,fontWeight:400,marginRight:6}}>Delete</span><IcTrash/>
-    </div>
-    <div style={{display:"flex",alignItems:"center",gap:12,background:C.card,border:`1px solid ${isWorkout?C.oMid:C.border}`,borderRadius:16,padding:"12px 14px",cursor:"pointer",transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
-      onClick={()=>{if(!editing&&swipeX===0)onTap(meal);}}
-      onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
-      {meal.imageBase64
-        ?<img src={`data:${meal.imageMime||"image/jpeg"};base64,${meal.imageBase64}`} style={{width:54,height:54,borderRadius:12,objectFit:"cover",flexShrink:0}} alt=""/>
-        :<div style={{width:54,height:54,borderRadius:12,background:isWorkout?C.oDim:C.hover,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:22}}>{isWorkout?"🔥":meal.emoji||"🍽️"}</span></div>
-      }
-      <div style={{flex:1,minWidth:0}}>
-        <p style={{fontSize:14,fontWeight:400,color:isWorkout?C.orange:C.text,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{meal.mealTitle}</p>
-        <p style={{fontSize:11,fontWeight:300,color:C.sub,lineHeight:1.4,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{meal.summary}</p>
-        <p style={{fontSize:10,fontWeight:300,color:C.dim,marginTop:3}}>{meal.time}</p>
-      </div>
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1,padding:"8px 10px",background:isWorkout?C.oDim:C.aDim,borderRadius:12,minWidth:56,position:"relative",flexShrink:0}}
-        onClick={e=>{e.stopPropagation();setEditing(true);setVal(String(meal.totalCalories));}}>
-        {editing
-          ?<input autoFocus type="number" inputMode="numeric" style={{width:48,background:"transparent",border:"none",borderBottom:`2px solid ${isWorkout?C.orange:C.accent}`,color:isWorkout?C.orange:C.accent,fontSize:16,fontWeight:200,textAlign:"center",outline:"none",fontFamily:"'Inter',sans-serif"}} value={val} onChange={e=>setVal(e.target.value)} onBlur={commit} onKeyDown={e=>e.key==="Enter"&&commit()} onClick={e=>e.stopPropagation()}/>
-          :<><span style={{fontSize:16,fontWeight:200,color:isWorkout?C.orange:C.accent,letterSpacing:"-0.5px"}}>{isWorkout?"-":""}{meal.totalCalories}</span><span style={{fontSize:9,color:isWorkout?C.oMid:C.aMid,textTransform:"uppercase"}}>{isWorkout?"burned":"kcal"}</span><span style={{position:"absolute",top:4,right:4,color:isWorkout?C.oMid:C.aMid}}><IcEdit/></span></>
-        }
-      </div>
-    </div>
-  </div>;
-}
-
-function WorkoutModal({onAdd,onClose}) {
-  const [cal,setCal]=useState("");
-  const [label,setLabel]=useState(()=>ls.get("jct:lastlabel")||"");
-  const [suggestions,setSuggestions]=useState([]);
-  const [showSugg,setShowSugg]=useState(false);
-  const [allLabels]=useState(()=>loadWorkoutLabels());
-  const calRef=useRef();
-  useEffect(()=>{setTimeout(()=>calRef.current?.focus(),100);},[]);
-  const handleLabelChange=v=>{setLabel(v);if(v.trim()){const m=allLabels.filter(l=>l.toLowerCase().includes(v.toLowerCase())&&l.toLowerCase()!==v.toLowerCase());setSuggestions(m);setShowSugg(m.length>0);}else setShowSugg(false);};
-  const submit=()=>{
-    const n=parseInt(cal);if(isNaN(n)||n<=0)return;
-    const fl=label.trim()||"Workout";ls.set("jct:lastlabel",fl);
-    if(fl!=="Workout"){const u=[...new Set([fl,...allLabels])].slice(0,20);saveWorkoutLabels(u);}
-    const now=new Date();
-    onAdd({id:uid(),type:"workout",mealTitle:fl,totalCalories:n,ingredients:[],summary:`${n} calories burned`,imageBase64:null,time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),addedAt:now.getTime(),emoji:"🔥"});
-  };
-  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end",zIndex:100}} onClick={onClose}>
-    <div style={{width:"100%",background:C.surface,borderRadius:"20px 20px 0 0",padding:"24px 20px 48px",border:`1px solid ${C.border}`}} onClick={e=>e.stopPropagation()}>
-      <div style={{width:36,height:4,background:C.border,borderRadius:2,margin:"0 auto 20px"}}/>
-      <p style={{fontSize:17,fontWeight:500,color:C.text,marginBottom:4}}>Log Workout</p>
-      <p style={{fontSize:12,fontWeight:300,color:C.sub,marginBottom:20}}>Calories burned will increase today's goal</p>
-      <div style={{position:"relative",marginBottom:12}}>
-        <input type="text" placeholder="Activity (e.g. OrangeTheory, Walking…)" value={label} onChange={e=>handleLabelChange(e.target.value)} onBlur={()=>setTimeout(()=>setShowSugg(false),150)}
-          style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:15,padding:"12px 16px",outline:"none",fontFamily:"'Inter',sans-serif"}}/>
-        {showSugg&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",zIndex:10,marginTop:4}}>
-          {suggestions.map((s,i)=><div key={i} onMouseDown={()=>{setLabel(s);setShowSugg(false);}} style={{padding:"12px 16px",fontSize:14,color:C.text,cursor:"pointer",borderBottom:i<suggestions.length-1?`1px solid ${C.border}`:"none"}}>{s}</div>)}
-        </div>}
-      </div>
-      <input ref={calRef} type="number" inputMode="numeric" placeholder="Calories burned" value={cal} onChange={e=>setCal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}
-        style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:22,fontWeight:200,padding:"14px 16px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:16,letterSpacing:"-0.5px"}}/>
-      <button style={{width:"100%",background:C.orange,border:"none",borderRadius:14,color:"#fff",fontSize:15,fontWeight:500,padding:"16px",opacity:parseInt(cal)>0?1:0.4}} onClick={submit} disabled={!(parseInt(cal)>0)}>Add Workout 🔥</button>
-    </div>
-  </div>;
-}
-
-function SettingsScreen({apiKey,onSave,onBack}) {
-  const [val,setVal]=useState("");
-  const [saved,setSaved]=useState(false);
-  const [err,setErr]=useState("");
-  const masked = apiKey ? `${apiKey.slice(0,14)}…${apiKey.slice(-4)}` : null;
-  const submit=()=>{
-    const t=val.trim();
-    if(!t){setErr("Please enter an API key");return;}
-    onSave(t);setSaved(true);setVal("");setErr("");
-    setTimeout(()=>setSaved(false),2500);
-  };
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 12px) 16px 20px"}}>
-      <button style={{width:44,height:44,borderRadius:12,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onBack}><IcBack/></button>
-      <span style={{fontSize:16,fontWeight:500,color:C.text}}>Settings</span>
-      <div style={{width:44}}/>
-    </div>
-    <div style={{padding:"0 16px",display:"flex",flexDirection:"column",gap:14}}>
-      <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px 18px 16px"}}>
-        <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>OpenAI API Key</p>
-        {masked
-          ?<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,padding:"10px 12px",background:C.aDim,borderRadius:10,border:`1px solid ${C.aMid}`}}>
-            <span style={{fontSize:11,color:C.accent,fontWeight:600}}>✓ Key saved:</span>
-            <span style={{fontSize:11,color:C.sub,fontFamily:"monospace"}}>{masked}</span>
-          </div>
-          :<p style={{fontSize:12,color:C.red,marginBottom:12,fontWeight:600}}>⚠ No key set — meals cannot be analyzed</p>
-        }
-        <p style={{fontSize:12,color:C.sub,lineHeight:1.6,marginBottom:12}}>Get a key at <span style={{color:C.accent}}>platform.openai.com/api-keys</span>. Stored only on this device.</p>
-        <input type="password" placeholder={masked?"Enter new key to replace…":"sk-..."} value={val}
-          onChange={e=>{setVal(e.target.value);setErr("");setSaved(false);}}
-          onKeyDown={e=>e.key==="Enter"&&submit()}
-          style={{width:"100%",background:C.hover,border:`1px solid ${err?C.red:C.border}`,borderRadius:12,color:C.text,fontSize:14,padding:"13px 14px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:8}}/>
-        {err&&<p style={{color:C.red,fontSize:12,marginBottom:8}}>{err}</p>}
-        <button style={{width:"100%",background:saved?C.aDim:C.accent,border:saved?`1px solid ${C.aMid}`:"none",borderRadius:12,color:saved?C.accent:C.bg,fontSize:14,fontWeight:500,padding:"13px"}} onClick={submit}>
-          {saved?"✓ Key Saved!":"Save Key"}
-        </button>
-      </div>
-      <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
-        <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:8}}>Voice Transcription</p>
-        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.7}}>Voice logging uses your browser's built-in speech recognition — free, no extra key needed. Works best in Chrome and Safari on iOS/Android.</p>
-      </div>
-      <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
-        <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:8}}>About Just Calories</p>
-        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.7}}>Photos are analyzed by GPT-5.5 — including barcodes and food labels. Voice descriptions are processed locally by your browser. All data stored on-device only.</p>
-      </div>
-    </div>
-  </div>;
-}
-
-function ApiKeyScreen({onSave}) {
-  const [val,setVal]=useState("");
-  const [err,setErr]=useState("");
-  const submit=()=>{if(!val.trim()){setErr("Please enter your API key");return;}onSave(val.trim());};
-  return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",background:C.bg}}>
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"40px 28px",width:"100%",maxWidth:380}}>
-      <span style={{fontSize:52,marginBottom:12}}>⚡</span>
-      <h1 style={{fontSize:32,fontWeight:200,color:C.text,textAlign:"center",lineHeight:1.15,letterSpacing:"-1.5px",marginBottom:6}}>Just Calories</h1>
-      <p style={{color:C.accent,fontSize:13,fontWeight:300,marginBottom:32,marginTop:6}}>Powered by GPT-5.5 Vision</p>
-      <div style={{width:"100%",background:C.surface,borderRadius:20,padding:"24px 20px",border:`1px solid ${C.border}`}}>
-        <p style={{color:C.sub,fontSize:13,lineHeight:1.7,textAlign:"center",marginBottom:4}}>Enter your OpenAI API key to get started.</p>
-        <p style={{color:C.dim,fontSize:12,lineHeight:1.6,textAlign:"center",marginBottom:16}}>Get one at <span style={{color:C.accent}}>platform.openai.com/api-keys</span></p>
-        <input style={{width:"100%",background:C.hover,border:`1px solid ${err?C.red:C.border}`,borderRadius:12,color:C.text,fontSize:15,padding:"14px 16px",outline:"none",fontFamily:"'Inter',sans-serif"}}
-          type="password" placeholder="sk-..." value={val} onChange={e=>{setVal(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&submit()}/>
-        {err&&<p style={{color:C.red,fontSize:12,marginTop:6}}>{err}</p>}
-        <button style={{width:"100%",background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"16px",marginTop:14}} onClick={submit}>Get Started →</button>
-      </div>
-      <p style={{color:C.dim,fontSize:11,marginTop:14,textAlign:"center",lineHeight:1.6}}>Stored only on this device. Never shared.</p>
-    </div>
-  </div>;
-}
-
-function HomeScreen({onOpenCamera,onOpenVoice,onSelectMeal,onAddWorkout,onOpenSettings,meals,goal,baseGoal,setBaseGoal,date,setDate}) {
+// ─── WIDGETS ──────────────────────────────────────────────────────────────────
+function CalorieRingWidget({meals,goal,baseGoal,setBaseGoal}) {
   const [editGoal,setEditGoal]=useState(false);
   const [goalVal,setGoalVal]=useState(String(baseGoal));
-  const [weightLog,setWeightLog]=useState(()=>loadWeights());
-  const [editWeight,setEditWeight]=useState(false);
-  const [weightVal,setWeightVal]=useState("");
-  const [showWorkout,setShowWorkout]=useState(false);
-  const fileRef=useRef();
-
   const eaten=meals.filter(m=>m.type!=="workout").reduce((s,m)=>s+m.totalCalories,0);
   const burned=meals.filter(m=>m.type==="workout").reduce((s,m)=>s+m.totalCalories,0);
   const protein=Math.round(meals.filter(m=>m.type!=="workout").reduce((s,m)=>s+(m.totalProteinG||0),0));
-  const latestW=weightLog.length>0?weightLog[weightLog.length-1].value:0;
-
-  const commitGoal=()=>{const n=parseInt(goalVal);if(!isNaN(n)&&n>0){setBaseGoal(n);saveBaseGoal(n);}else setGoalVal(String(baseGoal));setEditGoal(false);};
-  const commitWeight=()=>{const n=parseFloat(weightVal);if(!isNaN(n)&&n>0){const entry={date:fmtKey(new Date()),value:n};const next=[...weightLog.filter(w=>w.date!==entry.date),entry].sort((a,b)=>a.date.localeCompare(b.date));setWeightLog(next);saveWeights(next);}setEditWeight(false);};
-  const shift=days=>{const d=new Date(date);d.setDate(d.getDate()+days);setDate(d);};
-
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:40}}>
-    <div style={{padding:"env(safe-area-inset-top,44px) 20px 0",background:`linear-gradient(180deg,${C.surface} 0%,${C.bg} 100%)`}}>
-      <div style={{paddingTop:12,display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:20}}>⚡</span>
-          <span style={{fontSize:17,fontWeight:500,color:C.text,letterSpacing:"-0.3px"}}>Just Calories</span>
+  const pct=Math.min(eaten/goal,1),C2=2*Math.PI*50,dash=C2*(1-pct);
+  const ringColor=pct>1?C.red:pct>0.85?C.orange:C.accent;
+  const rem=goal-eaten;
+  const commit=()=>{const n=parseInt(goalVal);if(!isNaN(n)&&n>0){setBaseGoal(n);saveBaseGoal(n);}else setGoalVal(String(baseGoal));setEditGoal(false);};
+  return <Card style={{padding:"20px"}}>
+    <div style={{display:"flex",alignItems:"center",gap:18}}>
+      <div style={{position:"relative",flexShrink:0}}>
+        <svg width="108" height="108" viewBox="0 0 108 108">
+          <circle cx="54" cy="54" r="50" fill="none" stroke={C.hover} strokeWidth="8" transform="rotate(-90,54,54)"/>
+          <circle cx="54" cy="54" r="50" fill="none" stroke={ringColor} strokeWidth="8" strokeLinecap="round" strokeDasharray={C2} strokeDashoffset={dash} transform="rotate(-90,54,54)" style={{transition:"stroke-dashoffset .6s ease,stroke .3s"}}/>
+        </svg>
+        <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+          <span style={{fontSize:19,fontWeight:300,color:C.text,letterSpacing:"-0.5px"}}>{eaten.toLocaleString()}</span>
+          <span style={{fontSize:9,color:C.dim,letterSpacing:"0.3px"}}>kcal</span>
         </div>
-        <button style={{width:36,height:36,borderRadius:10,background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onOpenSettings}><IcGear/></button>
       </div>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
-        <button style={{width:34,height:34,borderRadius:10,background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>shift(-1)}><IcLeft/></button>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-          <span style={{fontSize:14,fontWeight:400,color:C.text}}>{fmtDisplay(date)}</span>
-          {!isToday(date)&&<button style={{background:C.aDim,border:`1px solid ${C.aMid}`,color:C.accent,borderRadius:20,fontSize:11,fontWeight:600,padding:"2px 10px"}} onClick={()=>setDate(new Date())}>Today</button>}
-        </div>
-        <button style={{width:34,height:34,borderRadius:10,background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>shift(1)}><IcRight/></button>
-      </div>
-    </div>
-
-    <div style={{display:"flex",gap:10,padding:"0 16px 16px"}}>
-      <div style={{flex:1,minWidth:0,overflow:"hidden",display:"flex",flexDirection:"column",gap:3,padding:"16px 18px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:18}}>
-        <span style={{fontSize:9,fontWeight:400,color:C.dim,textTransform:"uppercase",letterSpacing:"1px",marginBottom:2}}>Calories</span>
-        <div style={{display:"flex",alignItems:"baseline",gap:3,flexWrap:"wrap"}}>
-          <span style={{fontSize:26,fontWeight:200,color:C.text,letterSpacing:"-1.5px",lineHeight:1}}>{eaten}</span>
-          <span style={{fontSize:16,color:C.dim,fontWeight:300,margin:"0 2px"}}>/</span>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:14}}>
+          <span style={{fontSize:10,color:C.dim,letterSpacing:"0.3px"}}>Goal:</span>
           {editGoal
-            ?<input autoFocus type="number" inputMode="numeric" style={{background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:22,fontWeight:200,fontFamily:"'Inter',sans-serif",letterSpacing:"-0.5px",outline:"none",padding:0,width:80,lineHeight:1}} value={goalVal} onChange={e=>setGoalVal(e.target.value)} onBlur={commitGoal} onKeyDown={e=>e.key==="Enter"&&commitGoal()}/>
-            :<span style={{fontSize:20,fontWeight:200,color:C.sub,letterSpacing:"-0.5px",cursor:"pointer",lineHeight:1}} onClick={()=>{setGoalVal(String(baseGoal));setEditGoal(true);}}>{goal}</span>
+            ?<input autoFocus type="number" inputMode="numeric" style={{background:"transparent",border:"none",borderBottom:`1.5px solid ${C.accent}`,color:C.text,fontSize:14,fontWeight:300,fontFamily:"'Inter',sans-serif",outline:"none",padding:0,width:60}} value={goalVal} onChange={e=>setGoalVal(e.target.value)} onBlur={commit} onKeyDown={e=>e.key==="Enter"&&commit()}/>
+            :<span style={{fontSize:14,fontWeight:300,color:C.sub,cursor:"pointer"}} onClick={()=>{setGoalVal(String(baseGoal));setEditGoal(true);}}>{goal.toLocaleString()} kcal{burned>0&&<span style={{fontSize:10,color:C.orange}}> +{burned} burned</span>}</span>
           }
-          {!editGoal&&<span style={{color:C.dim,cursor:"pointer",display:"inline-flex",alignItems:"center",marginLeft:2}} onClick={()=>{setGoalVal(String(baseGoal));setEditGoal(true);}}><IcEdit/></span>}
         </div>
-        <span style={{fontSize:9,color:C.dim,fontWeight:300,marginTop:1}}>{editGoal?"enter base goal + return":burned>0?`${baseGoal} + ${burned} burned`:"calories eaten / goal"}</span>
-        <div style={{marginTop:6,paddingTop:6,borderTop:`1px solid ${C.border}`,display:"flex",alignItems:"baseline",gap:4}}>
-          <span style={{fontSize:18,fontWeight:200,color:"#60C8F5",letterSpacing:"-0.5px",lineHeight:1}}>{protein}g</span>
-          <span style={{fontSize:9,color:C.dim,fontWeight:300,textTransform:"uppercase",letterSpacing:"0.5px"}}>protein</span>
+        <div style={{display:"flex",gap:0}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:21,fontWeight:300,color:rem>=0?C.accent:C.red,letterSpacing:"-0.5px"}}>{Math.abs(rem).toLocaleString()}</div>
+            <div style={{fontSize:10,color:C.dim,marginTop:1}}>{rem>=0?"remaining":"over"}</div>
+          </div>
+          <div style={{flex:1,paddingLeft:14,borderLeft:`1px solid ${C.border}`}}>
+            <div style={{fontSize:21,fontWeight:300,color:C.blue,letterSpacing:"-0.5px"}}>{protein}g</div>
+            <div style={{fontSize:10,color:C.dim,marginTop:1}}>protein</div>
+          </div>
         </div>
-      </div>
-      <div style={{flex:1,minWidth:0,overflow:"hidden",display:"flex",flexDirection:"column",gap:3,padding:"16px 18px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:18}}>
-        <span style={{fontSize:9,fontWeight:400,color:C.dim,textTransform:"uppercase",letterSpacing:"1px",marginBottom:2}}>Weight</span>
-        <div style={{display:"flex",alignItems:"baseline",gap:3}}>
-          {editWeight
-            ?<input autoFocus style={{background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:26,fontWeight:200,fontFamily:"'Inter',sans-serif",letterSpacing:"-1.5px",outline:"none",padding:0,width:80,lineHeight:1}} placeholder="0" value={weightVal} onChange={e=>setWeightVal(e.target.value)} onBlur={commitWeight} onKeyDown={e=>e.key==="Enter"&&commitWeight()}/>
-            :<span style={{fontSize:26,fontWeight:200,color:C.text,letterSpacing:"-1.5px",lineHeight:1,cursor:"pointer"}} onClick={()=>{setWeightVal(latestW>0?String(latestW):"");setEditWeight(true);}}>{latestW>0?latestW:"—"}</span>
-          }
-          {!editWeight&&<span style={{color:C.dim,cursor:"pointer",display:"inline-flex",alignItems:"center",marginLeft:2}} onClick={()=>{setWeightVal(latestW>0?String(latestW):"");setEditWeight(true);}}><IcEdit/></span>}
-        </div>
-        <span style={{fontSize:9,color:C.dim,fontWeight:300,marginTop:1}}>{editWeight?"lbs, then return":"lbs"}</span>
-        {weightLog.length>=2&&<div style={{marginTop:4}}><WeightSparkline data={weightLog}/></div>}
       </div>
     </div>
+  </Card>;
+}
 
-    <div style={{display:"flex",gap:10,padding:"0 16px 18px"}}>
-      <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"15px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,color:C.text}} onClick={()=>fileRef.current.click()}><IcCamera/></button>
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{
-        const f=e.target.files[0]; if(!f) return;
-        const reader=new FileReader();
-        reader.onload=ev=>{
-          const img=new Image();
-          img.onload=()=>{
-            const MAX=1600;
-            let w=img.width, h=img.height;
-            if(w>MAX||h>MAX){ const s=Math.min(MAX/w,MAX/h); w=Math.round(w*s); h=Math.round(h*s); }
-            const canvas=document.createElement("canvas");
-            canvas.width=w; canvas.height=h;
-            canvas.getContext("2d").drawImage(img,0,0,w,h);
-            const dataUrl=canvas.toDataURL("image/jpeg",0.88);
-            onOpenCamera({base64:dataUrl.split(",")[1], mimeType:"image/jpeg"}, dataUrl);
-          };
-          img.src=ev.target.result;
-        };
-        reader.readAsDataURL(f); e.target.value="";
-      }}/>
-      <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"15px",background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:16,color:C.accent}} onClick={onOpenVoice}><IcMic/></button>
-      <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"15px",background:C.oDim,border:`1px solid ${C.oMid}`,borderRadius:16,color:C.orange,fontSize:22}} onClick={()=>setShowWorkout(true)}>🔥</button>
-    </div>
-
-    <div style={{padding:"0 16px"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-        <span style={{fontSize:15,fontWeight:500,color:C.text}}>Meals & Workouts</span>
-        <span style={{fontSize:12,color:C.dim}}>{meals.length} {meals.length===1?"entry":"entries"}</span>
-      </div>
-      {meals.length===0
-        ?<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"48px 20px",gap:10}}>
-          <span style={{fontSize:36}}>🍽️</span>
-          <p style={{color:C.sub,fontSize:14,textAlign:"center",lineHeight:1.6}}>Nothing logged yet.<br/>Tap 📷, 🎤, or 🔥 to get started.</p>
+function MacroBarsWidget({meals,options={}}) {
+  const tracked=options.trackedMacros||["protein","carbs","fat"];
+  const totals={protein:0,carbs:0,fat:0,sugar:0,fiber:0};
+  meals.filter(m=>m.type!=="workout").forEach(m=>{totals.protein+=(m.totalProteinG||0);totals.carbs+=(m.totalCarbsG||0);totals.fat+=(m.totalFatG||0);totals.sugar+=(m.totalSugarG||0);totals.fiber+=(m.totalFiberG||0);});
+  return <Card style={{padding:"14px 16px 12px"}}>
+    {tracked.map((macro,i)=>{const v=Math.round(totals[macro]||0),g=MACRO_GOALS[macro],pct=Math.min(v/g*100,100);
+      return <div key={macro} style={{display:"flex",alignItems:"center",gap:10,marginBottom:i<tracked.length-1?10:0}}>
+        <span style={{fontSize:13,fontWeight:300,color:C.text,width:58,flexShrink:0}}>{macro[0].toUpperCase()+macro.slice(1)}</span>
+        <div style={{flex:1,height:3,background:C.hover,borderRadius:2,overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${pct}%`,background:MACRO_COLORS[macro],borderRadius:2,transition:"width .5s ease"}}/>
         </div>
-        :[...meals].reverse().map(m=><MealCard key={m.id} meal={m} onTap={onSelectMeal}
-            onDelete={id=>onSelectMeal({...m,_delete:true})}
-            onQuickEdit={(id,cal)=>onSelectMeal({...m,_quickEdit:true,_newCal:cal})}/>)
+        <span style={{fontSize:11,color:C.dim,fontWeight:300,width:68,textAlign:"right",flexShrink:0}}>{v}g / {g}g</span>
+      </div>;
+    })}
+  </Card>;
+}
+
+function WaterTrackerWidget() {
+  const [cups,setCups]=useState(()=>parseInt(ls.get("jct:water:"+fmtKey(new Date()))||"0"));
+  const GOAL=8;
+  const toggle=i=>{const n=i<cups?i:i+1;setCups(n);ls.set("jct:water:"+fmtKey(new Date()),String(n));};
+  return <Card style={{padding:"14px 16px 12px"}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+      <span style={{fontSize:13,fontWeight:400,color:C.text}}>Water</span>
+      <span style={{fontSize:11,color:C.blue,fontWeight:300}}>{cups} / {GOAL} cups</span>
+    </div>
+    <div style={{display:"flex",gap:5}}>
+      {Array.from({length:GOAL},(_,i)=>(
+        <div key={i} onClick={()=>toggle(i)} style={{flex:1,height:26,borderRadius:6,background:i<cups?"rgba(90,200,250,0.18)":C.hover,border:`1px solid ${i<cups?C.blue:C.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:10}}>{i<cups?"💧":"·"}</div>
+      ))}
+    </div>
+  </Card>;
+}
+
+function WeightWidget({onOpenLog}) {
+  const [wlog,setWlog]=useState(()=>loadWeights());
+  const [editing,setEditing]=useState(false);
+  const [val,setVal]=useState("");
+  const latest=wlog.length>0?wlog[wlog.length-1].value:0;
+  const commit=()=>{
+    const n=parseFloat(val);
+    if(!isNaN(n)&&n>0){
+      const entry={date:fmtKey(new Date()),value:n};
+      const next=[...wlog.filter(w=>w.date!==entry.date),entry].sort((a,b)=>a.date.localeCompare(b.date));
+      setWlog(next);saveWeights(next);
+    }
+    setEditing(false);
+  };
+  // Last 6 months with tight range
+  const sixMonthsAgo=new Date();sixMonthsAgo.setMonth(sixMonthsAgo.getMonth()-6);
+  const chartData=wlog.filter(w=>new Date(w.date+"T12:00:00")>=sixMonthsAgo);
+
+  return <Card style={{padding:"14px 16px"}}>
+    <div style={{display:"flex",alignItems:"center",gap:12}}>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:4}}>Weight</div>
+        <div style={{display:"flex",alignItems:"baseline",gap:5}}>
+          {editing
+            ? <>
+                <input autoFocus type="number" inputMode="decimal" pattern="[0-9]*\.?[0-9]*"
+                  style={{background:"transparent",border:"none",borderBottom:`1.5px solid ${C.accent}`,color:C.text,fontSize:22,fontWeight:200,fontFamily:"'Inter',sans-serif",letterSpacing:"-1px",outline:"none",padding:0,width:80}}
+                  placeholder="0.0" value={val} onChange={e=>setVal(e.target.value)}
+                  onBlur={commit} onKeyDown={e=>e.key==="Enter"&&commit()}/>
+                <span style={{fontSize:11,color:C.dim,fontWeight:300}}>lbs</span>
+              </>
+            : <>
+                {/* Clicking the number → go to history page */}
+                <span style={{fontSize:22,fontWeight:200,color:C.text,letterSpacing:"-1px",cursor:"pointer"}}
+                  onClick={onOpenLog}>{latest>0?latest:"—"}</span>
+                <span style={{fontSize:11,color:C.dim,fontWeight:300}}>lbs</span>
+                {/* Edit icon → inline edit */}
+                <span onClick={e=>{e.stopPropagation();setVal(latest>0?String(latest):"");setEditing(true);}}
+                  style={{cursor:"pointer",color:C.dim,marginLeft:4,display:"inline-flex",alignItems:"center"}}>
+                  <Ic.Edit s={11}/>
+                </span>
+              </>
+          }
+        </div>
+        <button onClick={onOpenLog} style={{background:"none",border:"none",color:C.accent,fontSize:11,fontWeight:300,padding:0,marginTop:4,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}>
+          View history <Ic.ChevronRight s={11}/>
+        </button>
+      </div>
+      {/* Sparkline — always visible area */}
+      <div style={{width:120,height:48,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        {chartData.length>=2
+          ? <WeightSparkline data={chartData} width={120} height={48}/>
+          : <span style={{fontSize:10,color:C.dim,textAlign:"center",lineHeight:1.4}}>Log weight<br/>to see trend</span>
+        }
+      </div>
+    </div>
+  </Card>;
+}
+
+function StreakCounter() {
+  const [streak]=useState(()=>{let s=0,d=new Date();while(true){const k=fmtKey(d);if(loadMeals(k).length>0){s++;d.setDate(d.getDate()-1);}else break;}return s;});
+  return <Card style={{padding:"16px 18px"}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <div>
+        <div style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:4}}>Streak</div>
+        <div style={{fontSize:24,fontWeight:200,color:C.orange,letterSpacing:"-1px"}}>{streak} <span style={{fontSize:13,color:C.dim,fontWeight:300}}>days</span></div>
+      </div>
+      <div style={{fontSize:32}}>🔥</div>
+    </div>
+  </Card>;
+}
+
+function HistoryChart({options={}}) {
+  const days=options.days||7;
+  const data=useMemo(()=>{const arr=[];for(let i=days-1;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const k=fmtKey(d);const m=loadMeals(k);const cal=m.filter(x=>x.type!=="workout").reduce((s,x)=>s+x.totalCalories,0);arr.push({l:d.toLocaleDateString("en-US",{weekday:"short"}).slice(0,1),cal,today:i===0});}return arr;},[days]);
+  const maxCal=Math.max(...data.map(d=>d.cal),1);
+  return <Card style={{padding:"14px 14px 10px"}}>
+    <div style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:10}}>{days}-Day History</div>
+    <div style={{display:"flex",alignItems:"flex-end",gap:5,height:56}}>
+      {data.map((d,i)=>{const h=Math.max(d.cal/maxCal*48,2);return <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+        <div style={{width:"100%",height:48,display:"flex",alignItems:"flex-end"}}>
+          <div style={{width:"100%",height:`${h}px`,background:d.today?C.accent:"rgba(74,230,138,0.22)",borderRadius:"3px 3px 0 0",transition:"height .5s ease"}}/>
+        </div>
+        <span style={{fontSize:9,color:d.today?C.accent:C.dim,fontWeight:d.today?500:300}}>{d.l}</span>
+      </div>;})}
+    </div>
+  </Card>;
+}
+
+// ─── WEIGHT LOG PAGE ──────────────────────────────────────────────────────────
+function WeightLogScreen({onBack, aiProps}) {
+  const [wlog,setWlog]=useState(()=>loadWeights());
+  const [editing,setEditing]=useState(null);
+  const [editVal,setEditVal]=useState("");
+  const [confirmDel,setConfirmDel]=useState(null);
+
+  // Last 30 days for the list
+  const thirtyDaysAgo=new Date();thirtyDaysAgo.setDate(thirtyDaysAgo.getDate()-30);
+  const recentLog=wlog.filter(w=>new Date(w.date+"T12:00:00")>=thirtyDaysAgo);
+
+  // Last 6 months for the chart
+  const sixMonthsAgo=new Date();sixMonthsAgo.setMonth(sixMonthsAgo.getMonth()-6);
+  const chartData=wlog.filter(w=>new Date(w.date+"T12:00:00")>=sixMonthsAgo);
+
+  const commitEdit=(date)=>{
+    const n=parseFloat(editVal);
+    if(!isNaN(n)&&n>0){const next=wlog.map(w=>w.date===date?{...w,value:n}:w);setWlog(next);saveWeights(next);}
+    setEditing(null);
+  };
+  const deleteEntry=(date)=>{const next=wlog.filter(w=>w.date!==date);setWlog(next);saveWeights(next);setConfirmDel(null);};
+
+  const addToday=()=>{
+    const today=fmtKey(new Date());
+    const latest=wlog.length>0?wlog[wlog.length-1].value:0;
+    const next=[...wlog.filter(w=>w.date!==today),{date:today,value:latest||0}].sort((a,b)=>a.date.localeCompare(b.date));
+    setWlog(next);saveWeights(next);
+    setEditing(today);setEditVal(latest>0?String(latest):"");
+  };
+
+  // Full-width SVG chart with tight range
+  const ChartFull=()=>{
+    if(chartData.length<2)return null;
+    const vals=chartData.map(d=>d.value);
+    const rawMin=Math.min(...vals),rawMax=Math.max(...vals);
+    const pad=Math.max((rawMax-rawMin)*0.25,0.5);
+    const mn=rawMin-pad,mx=rawMax+pad,range=mx-mn||1;
+    const W=320,H=64,P=6;
+    const tx=i=>P+(i/Math.max(chartData.length-1,1))*(W-P*2);
+    const ty=v=>P+(1-(v-mn)/range)*(H-P*2);
+    const pts=chartData.map((d,i)=>`${tx(i)},${ty(d.value)}`).join(" ");
+    const trend=chartData[chartData.length-1].value<=chartData[0].value;
+    const lc=trend?C.accent:C.red;
+    const minVal=Math.min(...vals).toFixed(1);
+    const maxVal=Math.max(...vals).toFixed(1);
+    return <Card style={{padding:"14px 16px",marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <span style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px"}}>6-Month Trend</span>
+        <span style={{fontSize:10,color:C.dim}}>{minVal} – {maxVal} lbs</span>
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block",overflow:"visible"}}>
+        <polyline points={pts} fill="none" stroke={lc} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        {chartData.map((d,i)=><circle key={i} cx={tx(i)} cy={ty(d.value)} r="2" fill={lc} opacity="0.5"/>)}
+        <circle cx={tx(chartData.length-1)} cy={ty(chartData[chartData.length-1].value)} r="3.5" fill={lc}/>
+        <text x={P} y={H+12} fontSize="9" fill={C.dim}>{chartData[0]?.date?.slice(5)}</text>
+        <text x={W-P} y={H+12} fontSize="9" fill={C.dim} textAnchor="end">{chartData[chartData.length-1]?.date?.slice(5)}</text>
+      </svg>
+      <div style={{height:14}}/>
+    </Card>;
+  };
+
+  return <div style={{height:"100%",display:"flex",flexDirection:"column",background:C.bg}}>
+    <TopBar title="Weight History" onBack={onBack} rightEl={<AIButton {...aiProps}/>}/>
+    <div style={{flex:1,overflowY:"auto",padding:"12px 16px 24px"}}>
+      <ChartFull/>
+
+      <button onClick={addToday} style={{width:"100%",background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:12,color:C.accent,fontSize:14,fontWeight:400,padding:"12px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+        <Ic.Plus s={16}/> Log today's weight
+      </button>
+
+      <div style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:8,paddingLeft:2}}>Last 30 Days</div>
+      <Card>
+        {[...recentLog].reverse().map((entry,i)=>(
+          <div key={entry.date} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderBottom:i<recentLog.length-1?`1px solid ${C.border}`:"none"}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:11,color:C.sub,marginBottom:2}}>
+                {new Date(entry.date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}
+              </div>
+              {editing===entry.date
+                ? <input autoFocus type="number" inputMode="decimal" pattern="[0-9]*\.?[0-9]*"
+                    style={{background:"transparent",border:"none",borderBottom:`1.5px solid ${C.accent}`,color:C.text,fontSize:18,fontWeight:300,fontFamily:"'Inter',sans-serif",outline:"none",padding:0,width:90}}
+                    placeholder="0.0" value={editVal}
+                    onChange={e=>setEditVal(e.target.value)}
+                    onBlur={()=>commitEdit(entry.date)}
+                    onKeyDown={e=>e.key==="Enter"&&commitEdit(entry.date)}/>
+                : <div style={{fontSize:18,fontWeight:300,color:C.text,letterSpacing:"-0.5px",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}
+                    onClick={()=>{setEditing(entry.date);setEditVal(String(entry.value));}}>
+                    {entry.value} <span style={{fontSize:11,color:C.dim}}>lbs</span>
+                    <Ic.Edit s={11}/>
+                  </div>
+              }
+            </div>
+            {confirmDel===entry.date
+              ? <div style={{display:"flex",gap:6}}>
+                  <button style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:8,color:C.sub,fontSize:11,padding:"5px 10px"}} onClick={()=>setConfirmDel(null)}>Cancel</button>
+                  <button style={{background:C.rDim,border:`1px solid ${C.rMid}`,borderRadius:8,color:C.red,fontSize:11,padding:"5px 10px"}} onClick={()=>deleteEntry(entry.date)}>Delete</button>
+                </div>
+              : <button onClick={()=>setConfirmDel(entry.date)} style={{background:"none",border:"none",color:C.dim,padding:"6px"}}><Ic.Trash s={14}/></button>
+            }
+          </div>
+        ))}
+        {recentLog.length===0&&<div style={{padding:"28px",textAlign:"center",color:C.sub,fontSize:13}}>No entries in the last 30 days.<br/>Tap the button above to log today.</div>}
+      </Card>
+    </div>
+  </div>;
+}
+
+// ─── MEAL LIST ────────────────────────────────────────────────────────────────
+function WorkoutModal({onAdd,onClose}) {
+  const [cal,setCal]=useState("");const [label,setLabel]=useState(()=>ls.get("jct:lastlabel")||"");const calRef=useRef();
+  useEffect(()=>{setTimeout(()=>calRef.current?.focus(),100);},[]);
+  const submit=()=>{const n=parseInt(cal);if(isNaN(n)||n<=0)return;const fl=label.trim()||"Workout";ls.set("jct:lastlabel",fl);const now=new Date();onAdd({id:uid(),type:"workout",mealTitle:fl,totalCalories:n,ingredients:[],summary:`${n} cal burned`,imageBase64:null,time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),addedAt:now.getTime(),emoji:"🔥"});};
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"flex-end",zIndex:200}} onClick={onClose}>
+    <div style={{width:"100%",background:C.surface,borderRadius:"20px 20px 0 0",padding:`20px 20px ${SAB}`,border:`1px solid ${C.border}`}} onClick={e=>e.stopPropagation()}>
+      <div style={{width:30,height:3,background:C.border,borderRadius:2,margin:"0 auto 16px"}}/>
+      <p style={{fontSize:15,fontWeight:400,color:C.text,marginBottom:14}}>Log Workout</p>
+      <input type="text" placeholder="Activity (e.g. OrangeTheory)" value={label} onChange={e=>setLabel(e.target.value)} style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:10,color:C.text,fontSize:14,fontWeight:300,padding:"11px 14px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:10}}/>
+      <input ref={calRef} type="number" inputMode="numeric" placeholder="Calories burned" value={cal} onChange={e=>setCal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:10,color:C.text,fontSize:20,fontWeight:300,padding:"12px 14px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:12}}/>
+      <button style={{width:"100%",background:C.orange,border:"none",borderRadius:12,color:"#fff",fontSize:14,fontWeight:500,padding:"13px",opacity:parseInt(cal)>0?1:0.35}} onClick={submit} disabled={!(parseInt(cal)>0)}>Add Workout 🔥</button>
+    </div>
+  </div>;
+}
+
+function MealRow({meal,onTap,onDelete,onQuickEdit}) {
+  const [editing,setEditing]=useState(false);const [val,setVal]=useState(String(meal.totalCalories));
+  const [swipeX,setSwipeX]=useState(0);const [swiping,setSwiping]=useState(false);
+  const txRef=useRef(0),tyRef=useRef(0);
+  const isW=meal.type==="workout";
+  const commit=()=>{const n=parseInt(val);if(!isNaN(n)&&n>=0)onQuickEdit(meal.id,n);else setVal(String(meal.totalCalories));setEditing(false);};
+  const onTS=e=>{txRef.current=e.touches[0].clientX;tyRef.current=e.touches[0].clientY;setSwiping(false);};
+  const onTM=e=>{const dx=e.touches[0].clientX-txRef.current;const dy=Math.abs(e.touches[0].clientY-tyRef.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<0){setSwiping(true);setSwipeX(Math.max(dx,-88));}};
+  const onTE=()=>{if(swipeX<=-80)onDelete(meal.id);else{setSwipeX(0);setSwiping(false);}};
+  return <div style={{position:"relative",borderBottom:`1px solid ${C.border}`}}>
+    <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:16}}>
+      <span style={{color:"#fff",fontSize:11,fontWeight:500}}>Delete</span>
+    </div>
+    <div style={{display:"flex",alignItems:"center",gap:12,padding:"11px 14px",background:C.surface,transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform .25s ease",cursor:"pointer"}}
+      onClick={()=>{if(!editing&&swipeX===0)onTap(meal);}} onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
+      {meal.imageBase64
+        ?<img src={`data:${meal.imageMime||"image/jpeg"};base64,${meal.imageBase64}`} style={{width:44,height:44,borderRadius:9,objectFit:"cover",flexShrink:0}} alt=""/>
+        :<div style={{width:44,height:44,borderRadius:9,background:isW?C.oDim:C.hover,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>{isW?"🔥":meal.emoji||"🍽️"}</div>
       }
+      <div style={{flex:1,minWidth:0}}>
+        <p style={{fontSize:14,fontWeight:400,color:isW?C.orange:C.text,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{meal.mealTitle}</p>
+        <p style={{fontSize:11,color:C.sub,fontWeight:300}}>{meal.time}</p>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:2,padding:"6px 9px",background:isW?C.oDim:C.aDim,borderRadius:9,flexShrink:0,cursor:"pointer"}}
+        onClick={e=>{e.stopPropagation();setEditing(true);setVal(String(meal.totalCalories));}}>
+        {editing
+          ?<input autoFocus type="number" inputMode="numeric" style={{width:44,background:"transparent",border:"none",borderBottom:`1.5px solid ${isW?C.orange:C.accent}`,color:isW?C.orange:C.accent,fontSize:14,fontWeight:400,textAlign:"center",outline:"none",fontFamily:"'Inter',sans-serif"}} value={val} onChange={e=>setVal(e.target.value)} onBlur={commit} onKeyDown={e=>e.key==="Enter"&&commit()} onClick={e=>e.stopPropagation()}/>
+          :<><span style={{fontSize:14,fontWeight:400,color:isW?C.orange:C.accent,letterSpacing:"-0.3px"}}>{isW?"-":""}{meal.totalCalories}</span><span style={{fontSize:9,color:isW?"rgba(255,149,0,0.5)":"rgba(74,230,138,0.5)",marginLeft:1}}>kcal</span></>
+        }
+      </div>
     </div>
+  </div>;
+}
+
+function MealListWidget({meals,onSelectMeal,onAddWorkout,fileRef,onOpenVoice}) {
+  const [showWorkout,setShowWorkout]=useState(false);
+  return <div>
+    <div style={{display:"flex",gap:8,marginBottom:8}}>
+      <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"14px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,color:C.sub,fontSize:13}} onClick={()=>fileRef.current?.click()}><Ic.Camera s={22}/></button>
+      <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"14px",background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:12,color:C.accent,fontSize:13}} onClick={onOpenVoice}><Ic.Mic s={22}/></button>
+      <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"14px",background:C.oDim,border:`1px solid ${C.oMid}`,borderRadius:12,color:C.orange,fontSize:13}} onClick={()=>setShowWorkout(true)}><Ic.Fire s={22}/></button>
+    </div>
+    <Card>
+      {meals.length===0
+        ?<div style={{padding:"28px 18px",textAlign:"center"}}><div style={{fontSize:26,marginBottom:8}}>🍽️</div><p style={{color:C.sub,fontSize:13,fontWeight:300,lineHeight:1.7}}>Nothing logged yet.<br/>Use the buttons above.</p></div>
+        :[...meals].reverse().map(m=><MealRow key={m.id} meal={m} onTap={onSelectMeal} onDelete={id=>onSelectMeal({...m,_delete:true})} onQuickEdit={(id,cal)=>onSelectMeal({...m,_quickEdit:true,_newCal:cal})}/>)
+      }
+    </Card>
     {showWorkout&&<WorkoutModal onAdd={w=>{onAddWorkout(w);setShowWorkout(false);}} onClose={()=>setShowWorkout(false)}/>}
   </div>;
 }
 
-// ─── FIX 4: useWebSpeech now exposes the MediaStream so visualizer can use it ─
-// When SpeechRecognition is active, the mic is already open. We call getUserMedia
-// after a short delay (SpeechRecognition holds the grant), reusing the same
-// permission — browsers do NOT re-prompt if permission is already granted.
-function useWebSpeech(onUpdate) {
-  const recRef = useRef(null);
-  const [listening, setListening] = useState(false);
-  const supported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-
-  const start = useCallback(() => {
-    if (!supported) return;
-    try {
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const rec = new SR();
-      recRef.current = rec;
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = "en-US";
-      let final = "";
-      rec.onresult = e => {
-        let interim = "";
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          const t = e.results[i][0].transcript;
-          if (e.results[i].isFinal) final += t + " ";
-          else interim = t;
-        }
-        onUpdate(final + interim);
-      };
-      rec.onerror = () => setListening(false);
-      rec.onend = () => setListening(false);
-      rec.start();
-      setListening(true);
-      // NOTE: We intentionally do NOT call getUserMedia here.
-      // SpeechRecognition handles mic access on its own. A separate getUserMedia
-      // call triggers a second iOS permission prompt even when already granted.
-      // The visualizer uses animated bars instead — cosmetically identical.
-    } catch { setListening(false); }
-  }, [supported, onUpdate]);
-
-  const stop = useCallback(() => {
-    try { recRef.current?.stop(); } catch {}
-    setListening(false);
-  }, []);
-
-  return { listening, supported, start, stop, stream: null };
+// ─── RENDER WIDGET ────────────────────────────────────────────────────────────
+function renderWidget(id,ctx) {
+  const {meals,goal,baseGoal,setBaseGoal,onSelectMeal,onAddWorkout,onOpenVoice,fileRef,widgetConfig,onOpenWeightLog}=ctx;
+  const opts=widgetConfig.options?.[id]||{};
+  switch(id){
+    case "calorie_ring":   return <CalorieRingWidget meals={meals} goal={goal} baseGoal={baseGoal} setBaseGoal={setBaseGoal}/>;
+    case "macro_bars":     return <MacroBarsWidget meals={meals} options={opts}/>;
+    case "water_tracker":  return <WaterTrackerWidget/>;
+    case "weight_widget":  return <WeightWidget onOpenLog={onOpenWeightLog}/>;
+    case "streak_counter": return <StreakCounter/>;
+    case "history_chart":  return <HistoryChart options={opts}/>;
+    case "meal_list":      return <MealListWidget meals={meals} onSelectMeal={onSelectMeal} onAddWorkout={onAddWorkout} onOpenVoice={onOpenVoice} fileRef={fileRef}/>;
+    default: return null;
+  }
 }
 
-function VoiceScreen({apiKey,onBack,onAdd}) {
-  const [transcript,setTranscript]=useState("");
-  const [error,setError]=useState("");
-  const [submitting,setSubmitting]=useState(false);
-  const [foodSugg,setFoodSugg]=useState([]);
-  const [showFoodSugg,setShowFoodSugg]=useState(false);
-  const foodHistRef=useRef(loadFoodHistory());
-
-  const onUpdate = useCallback(text => { setTranscript(text); }, []);
-  const speech = useWebSpeech(onUpdate);
-
-  useEffect(() => {
-    if (speech.supported) setTimeout(() => speech.start(), 200);
-    return () => speech.stop();
-  }, []);
-
-  const handleChange = v => {
-    setTranscript(v);
-    const words = v.split(/[\s,]+/);
-    const last = words[words.length-1].trim();
-    if (last.length>=2) {
-      const m = foodHistRef.current.filter(f=>f.name.toLowerCase().includes(last.toLowerCase())).slice(0,4);
-      setFoodSugg(m); setShowFoodSugg(m.length>0);
-    } else setShowFoodSugg(false);
+// ─── HOME SCREEN ──────────────────────────────────────────────────────────────
+function HomeScreen({onOpenCamera,onOpenVoice,onSelectMeal,onAddWorkout,onOpenSettings,meals,goal,baseGoal,setBaseGoal,date,setDate,widgetConfig,onConfigChange,onOpenWeightLog,aiProps}) {
+  const fileRef=useRef();
+  const handleFile=e=>{
+    const f=e.target.files[0];if(!f)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{const img=new Image();img.onload=()=>{const MAX=1600;let w=img.width,h=img.height;if(w>MAX||h>MAX){const s=Math.min(MAX/w,MAX/h);w=Math.round(w*s);h=Math.round(h*s);}const canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;canvas.getContext("2d").drawImage(img,0,0,w,h);const dataUrl=canvas.toDataURL("image/jpeg",.88);onOpenCamera({base64:dataUrl.split(",")[1],mimeType:"image/jpeg"},dataUrl);};img.src=ev.target.result;};
+    reader.readAsDataURL(f);e.target.value="";
   };
-
-  const submit = async () => {
-    if (!transcript.trim()) return;
-    speech.stop();
-    setSubmitting(true);
-    try {
-      const r = await analyze(apiKey, null, transcript);
-      const now = new Date();
-      onAdd({id:uid(),mealTitle:r.mealTitle,totalCalories:r.totalCalories,totalProteinG:r.totalProteinG||0,ingredients:r.ingredients||[],summary:r.summary,imageBase64:null,time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),addedAt:now.getTime(),emoji:r.emoji||"🍽️"});
-    } catch(e) { setError(e.message||"Error — check Settings ⚙️"); setSubmitting(false); }
+  const shift=days=>{
+    const d=new Date(date);d.setDate(d.getDate()+days);
+    // Prevent navigating to future dates
+    if(days>0 && fmtKey(d)>fmtKey(new Date())) return;
+    setDate(d);
   };
+  const ctx={meals,goal,baseGoal,setBaseGoal,onSelectMeal,onAddWorkout,onOpenVoice,fileRef,widgetConfig,onOpenWeightLog};
+  const visibleOrdered=widgetConfig.order.filter(id=>widgetConfig.visible.includes(id));
 
-  if (submitting) return <Spinner text="Calculating calories…"/>;
-
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:40}}>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 12px) 16px 12px"}}>
-      <button style={{width:44,height:44,borderRadius:12,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{speech.stop();onBack();}}><IcBack/></button>
-      <span style={{fontSize:16,fontWeight:500,color:C.text}}>Voice Log</span>
-      <div style={{width:44}}/>
-    </div>
-    <div style={{display:"flex",flexDirection:"column",gap:16,padding:"8px 20px 40px"}}>
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:14,paddingTop:8}}>
-        <div onClick={speech.listening?speech.stop:speech.start}
-          style={{width:100,height:100,borderRadius:"50%",background:speech.listening?"rgba(255,68,68,0.12)":"rgba(74,230,138,0.1)",border:`2px solid ${speech.listening?C.red:C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all 0.3s",boxShadow:speech.listening?"0 0 0 12px rgba(255,68,68,0.06)":"0 0 0 12px rgba(74,230,138,0.06)",animation:speech.listening?"ripple 1.5s ease-out infinite":"none"}}>
-          <div style={{color:speech.listening?C.red:C.accent}}>{speech.listening?<IcStop size={32}/>:<IcMic size={40}/>}</div>
+  return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+    {/* Top header */}
+    <div style={{padding:`${SAT} 16px 10px`,background:C.surface,borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+        <span style={{fontSize:11,fontWeight:300,color:C.dim,letterSpacing:"1.5px",textTransform:"uppercase"}}>Just Calories</span>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <AIButton {...aiProps}/>
+          <button style={{width:36,height:36,borderRadius:10,background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onOpenSettings}><Ic.Gear/></button>
         </div>
-        <p style={{fontSize:15,fontWeight:300,color:speech.listening?C.red:C.sub,textAlign:"center"}}>
-          {!speech.supported?"Type your meal below":speech.listening?"Listening… tap to stop":"Tap mic to speak"}
-        </p>
       </div>
-      <VoiceVisualizer active={speech.listening} mediaStream={speech.stream}/>
-      <div style={{position:"relative"}}>
-        <textarea style={{width:"100%",minHeight:110,background:C.surface,border:`1px solid ${transcript?C.aMid:C.border}`,borderRadius:14,color:transcript?C.text:C.sub,fontSize:14,padding:"14px 16px",resize:"none",outline:"none",fontFamily:"'Inter',sans-serif",lineHeight:1.65,transition:"border-color 0.2s"}}
-          placeholder={speech.supported?"Words appear here as you speak…\nOr type what you ate.":"Type what you ate (e.g. 'grilled chicken, rice, broccoli')"}
-          value={transcript} onChange={e=>handleChange(e.target.value)} onBlur={()=>setTimeout(()=>setShowFoodSugg(false),150)}/>
-        {showFoodSugg&&<div style={{position:"absolute",bottom:"100%",left:0,right:0,background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:4,zIndex:10}}>
-          <p style={{fontSize:10,fontWeight:400,color:C.dim,textTransform:"uppercase",letterSpacing:"1px",padding:"8px 14px 4px"}}>Previously logged</p>
-          {foodSugg.map((f,i)=><div key={i} onMouseDown={()=>{const w=transcript.split(/[\s,]+/);w[w.length-1]=f.name;setTranscript(w.join(" ")+` (${f.calories} cal)`);setShowFoodSugg(false);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderTop:`1px solid ${C.border}`,cursor:"pointer"}}>
-            <span style={{fontSize:14,color:C.text}}>{f.name}</span>
-            <span style={{fontSize:13,fontWeight:400,color:C.accent}}>{f.calories} cal</span>
-          </div>)}
-        </div>}
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <button style={{width:30,height:30,borderRadius:8,background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>shift(-1)}><Ic.Left/></button>
+        <div style={{flex:1,textAlign:"center"}}>
+          <div style={{fontSize:13,fontWeight:400,color:C.text}}>{fmtDisplay(date)}</div>
+          {!isToday(date)&&<button style={{background:C.aDim,border:`1px solid ${C.aMid}`,color:C.accent,borderRadius:20,fontSize:9,fontWeight:500,padding:"2px 8px",marginTop:1}} onClick={()=>setDate(new Date())}>Today</button>}
+        </div>
+        <button style={{width:30,height:30,borderRadius:8,background:C.hover,border:`1px solid ${C.border}`,color:isToday(date)?C.border:C.sub,display:"flex",alignItems:"center",justifyContent:"center",opacity:isToday(date)?0.3:1}} onClick={()=>shift(1)} disabled={isToday(date)}><Ic.Right/></button>
       </div>
-      {error&&<p style={{color:C.red,fontSize:13,textAlign:"center",lineHeight:1.5}}>{error}</p>}
-      <div style={{display:"flex",gap:10}}>
-        {speech.listening&&<button style={{flexShrink:0,background:C.rDim,border:`2px solid ${C.red}`,borderRadius:14,color:C.red,fontSize:13,fontWeight:500,padding:"16px 14px",display:"flex",alignItems:"center",gap:6}} onClick={speech.stop}><IcStop size={14}/> Stop</button>}
-        <button style={{flex:1,background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"16px",opacity:transcript.trim()?1:0.3}} onClick={submit} disabled={!transcript.trim()}>Add to Log →</button>
-      </div>
+    </div>
+    <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleFile}/>
+    <div style={{flex:1,overflowY:"auto",padding:"12px 16px 20px",WebkitOverflowScrolling:"touch"}}>
+      {visibleOrdered.map((id,idx)=>{
+        const widget=renderWidget(id,ctx);
+        if(!widget)return null;
+        return <div key={id} style={{marginBottom:8,animation:"widgetIn .3s cubic-bezier(.34,1.36,.64,1) both"}}>{widget}</div>;
+      })}
     </div>
   </div>;
 }
 
-function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
-  const [note,setNote]=useState("");
-  const [error,setError]=useState("");
-  const [submitting,setSubmitting]=useState(false);
+// ─── INGREDIENT DETAIL SCREEN ─────────────────────────────────────────────────
+function IngredientDetailScreen({ingredient, mealId, onBack, onSave, onDelete}) {
+  const [ing, setIng] = useState({...ingredient});
+  const [editField, setEditField] = useState(null);
+  const [editVal, setEditVal] = useState("");
+  const [confirmDel, setConfirmDel] = useState(false);
 
-  const onUpdate = useCallback(text => setNote(text), []);
-  const speech = useWebSpeech(onUpdate);
-  useEffect(() => () => speech.stop(), []);
+  const fields = [
+    {key:"servings", label:"Servings", unit:""},
+    {key:"calories", label:"Calories", unit:"kcal"},
+    {key:"proteinG", label:"Protein", unit:"g"},
+    {key:"carbsG",   label:"Carbs",   unit:"g"},
+    {key:"fatG",     label:"Fat",     unit:"g"},
+    {key:"sugarG",   label:"Sugar",   unit:"g"},
+    {key:"fiberG",   label:"Fiber",   unit:"g"},
+  ];
 
-  const submit = async () => {
-    speech.stop();
-    setError("");
-    setSubmitting(true);
-    try {
-      const r = await analyze(apiKey, imageData, note || undefined);
-      const now = new Date();
-      onAdd({
-        id:uid(), mealTitle:r.mealTitle, totalCalories:r.totalCalories,
-        totalProteinG:r.totalProteinG||0, ingredients:r.ingredients||[],
-        summary:r.summary, imageBase64:imageData?.base64||null,
-        imageMime:imageData?.mimeType||"image/jpeg",
-        time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
-        addedAt:now.getTime(), emoji:r.emoji||null
-      });
-    } catch(e) {
-      setError(e.message || "Analysis failed — check Settings ⚙️");
-      setSubmitting(false);
+  const startEdit=(field,val)=>{ setEditField(field); setEditVal(String(val??0)); };
+  const commitEdit=(field)=>{
+    const n=parseFloat(editVal);
+    if(!isNaN(n)&&n>=0){
+      const updated={...ing,[field]:n};
+      // If servings changed, scale all macros
+      if(field==="servings"&&ing.servings>0){
+        const ratio=n/ing.servings;
+        updated.calories=Math.round((ing.calories||0)*ratio);
+        updated.proteinG=parseFloat(((ing.proteinG||0)*ratio).toFixed(1));
+        updated.carbsG=parseFloat(((ing.carbsG||0)*ratio).toFixed(1));
+        updated.fatG=parseFloat(((ing.fatG||0)*ratio).toFixed(1));
+        updated.sugarG=parseFloat(((ing.sugarG||0)*ratio).toFixed(1));
+        updated.fiberG=parseFloat(((ing.fiberG||0)*ratio).toFixed(1));
+      }
+      setIng(updated);
     }
+    setEditField(null);
   };
 
-  if (submitting && !error) return <Spinner text="Analyzing with GPT-5.5…"/>;
+  const save=()=>{ onSave(ing); recordFoodToDB(ing); };
 
-  return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column"}}>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 8px) 16px 8px",flexShrink:0}}>
-      <button style={{width:40,height:40,borderRadius:11,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{speech.stop();onBack();}}><IcBack/></button>
-      <span style={{fontSize:16,fontWeight:500,color:C.text}}>Add Meal Photo</span>
-      <div style={{width:40}}/>
-    </div>
-    {imagePreview&&<div style={{flex:1,minHeight:0,padding:"0 16px 8px"}}>
-      <img src={imagePreview} style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:16,border:`1px solid ${C.border}`,display:"block"}} alt=""/>
-    </div>}
-    <div style={{flexShrink:0,padding:"0 16px calc(env(safe-area-inset-bottom,16px) + 12px)",display:"flex",flexDirection:"column",gap:8}}>
-      {speech.supported&&(
-        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:C.surface,borderRadius:14,border:`1px solid ${C.border}`}}>
-          <div onClick={speech.listening?speech.stop:speech.start}
-            style={{width:40,height:40,borderRadius:"50%",flexShrink:0,background:speech.listening?"rgba(255,68,68,0.12)":"rgba(74,230,138,0.1)",border:`2px solid ${speech.listening?C.red:C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all 0.3s"}}>
-            <div style={{color:speech.listening?C.red:C.accent}}>{speech.listening?<IcStop size={14}/>:<IcMic size={18}/>}</div>
+  return <div style={{height:"100%",display:"flex",flexDirection:"column",background:C.bg}}>
+    <TopBar title={ing.name} onBack={onBack}/>
+    <div style={{flex:1,overflowY:"auto",padding:"12px 16px 24px"}}>
+      <Card>
+        {fields.map((f,i)=>(
+          <div key={f.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:i<fields.length-1?`1px solid ${C.border}`:"none"}}>
+            <span style={{fontSize:14,fontWeight:300,color:C.text}}>{f.label}</span>
+            {editField===f.key
+              ?<input autoFocus type="number" inputMode="decimal" style={{width:90,background:"transparent",border:"none",borderBottom:`1.5px solid ${C.accent}`,color:C.accent,fontSize:15,fontWeight:400,textAlign:"right",outline:"none",fontFamily:"'Inter',sans-serif"}} value={editVal} onChange={e=>setEditVal(e.target.value)} onBlur={()=>commitEdit(f.key)} onKeyDown={e=>e.key==="Enter"&&commitEdit(f.key)}/>
+              :<div style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}} onClick={()=>startEdit(f.key,ing[f.key])}>
+                <span style={{fontSize:15,fontWeight:300,color:C.accent}}>{ing[f.key]??0}{f.unit}</span>
+                <Ic.Edit s={12}/>
+              </div>
+            }
           </div>
-          {speech.listening
-            ?<div style={{flex:1,height:36}}><VoiceVisualizer active={true} mediaStream={speech.stream}/></div>
-            :<span style={{flex:1,fontSize:13,color:C.sub}}>Tap mic to add voice notes (optional)</span>
-          }
+        ))}
+      </Card>
+      <button onClick={save} style={{width:"100%",background:C.accent,border:"none",borderRadius:12,color:C.bg,fontSize:14,fontWeight:500,padding:"13px",marginTop:12}}>Save Changes</button>
+      <button onClick={()=>setConfirmDel(true)} style={{width:"100%",background:C.rDim,border:`1px solid ${C.rMid}`,borderRadius:12,color:C.red,fontSize:14,fontWeight:400,padding:"13px",marginTop:8}}>Remove from all meals</button>
+      {confirmDel&&<div style={{marginTop:8,background:C.hover,borderRadius:12,padding:"14px"}}>
+        <p style={{color:C.text,fontSize:13,marginBottom:10}}>Remove "{ing.name}" from this meal and food history?</p>
+        <div style={{display:"flex",gap:8}}>
+          <button style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,borderRadius:10,color:C.sub,fontSize:13,padding:"10px"}} onClick={()=>setConfirmDel(false)}>Cancel</button>
+          <button style={{flex:1,background:C.red,border:"none",borderRadius:10,color:"#fff",fontSize:13,padding:"10px"}} onClick={()=>onDelete(ing.name)}>Remove</button>
         </div>
-      )}
-      <textarea style={{width:"100%",height:68,background:C.surface,border:`1px solid ${note?C.aMid:C.border}`,borderRadius:12,color:note?C.text:C.sub,fontSize:13,padding:"10px 14px",resize:"none",outline:"none",fontFamily:"'Inter',sans-serif",lineHeight:1.55}}
-        placeholder="Add notes (optional) — ingredients, portions, brand…"
-        value={note} onChange={e=>setNote(e.target.value)}/>
-      {error&&<div style={{background:C.rDim,border:`1px solid ${C.rMid}`,borderRadius:12,padding:"12px 14px",marginBottom:2}}>
-        <p style={{color:C.red,fontSize:13,fontWeight:600,lineHeight:1.5}}>⚠ {error}</p>
       </div>}
-      <button style={{width:"100%",background:C.accent,border:"none",borderRadius:13,color:C.bg,fontSize:15,fontWeight:500,padding:"14px"}} onClick={submit}>
-        {error?"Retry →":"Analyze & Add →"}
-      </button>
     </div>
   </div>;
 }
 
-function SwipeIngRow({ing,idx,editIdx,ingVal,setIngVal,setEditIdx,commitIng,onDelete}) {
-  const [swipeX,setSwipeX]=useState(0);const[swiping,setSwiping]=useState(false);
-  const tx=useRef(0),ty=useRef(0);const THRESHOLD=70;
-  const onTS=e=>{tx.current=e.touches[0].clientX;ty.current=e.touches[0].clientY;setSwiping(false);};
-  const onTM=e=>{const dx=e.touches[0].clientX-tx.current;const dy=Math.abs(e.touches[0].clientY-ty.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<0){setSwiping(true);setSwipeX(Math.max(dx,-(THRESHOLD+20)));}};
-  const onTE=()=>{if(swipeX<=-THRESHOLD)onDelete(idx);else{setSwipeX(0);setSwiping(false);}};
-  return <div style={{position:"relative",overflow:"hidden",borderTop:`1px solid ${C.border}`}}>
-    <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:16}}>
-      <span style={{color:"#fff",fontSize:12,fontWeight:400,marginRight:4}}>Delete</span><IcTrash/>
+// ─── DETAIL SCREEN ────────────────────────────────────────────────────────────
+function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey,onOpenIngredient}) {
+  const [ings,setIngs]=useState(meal.ingredients||[]);
+  const [editTotal,setEditTotal]=useState(false);
+  const [totalVal,setTotalVal]=useState(String(meal.totalCalories));
+  const [addingVoice,setAddingVoice]=useState(false);
+  const [addTranscript,setAddTranscript]=useState("");
+  const [addError,setAddError]=useState("");
+  const [addLoading,setAddLoading]=useState(false);
+  const [confirmDelete,setConfirmDelete]=useState(false);
+  const isW=meal.type==="workout";
+  const onUpd2=useCallback(t=>setAddTranscript(t),[]);
+  const speech=useWebSpeech(onUpd2);
+  useEffect(()=>()=>speech.stop(),[]);
+
+  // Recalculate total from ingredients
+  const recalcTotal=(newIngs)=>{
+    const tot=newIngs.reduce((s,x)=>s+(x.calories||0),0);
+    const prot=newIngs.reduce((s,x)=>s+(x.proteinG||0),0);
+    const carbs=newIngs.reduce((s,x)=>s+(x.carbsG||0),0);
+    const fat=newIngs.reduce((s,x)=>s+(x.fatG||0),0);
+    return {tot,prot,carbs,fat};
+  };
+
+  const commitTotal=()=>{const n=parseInt(totalVal);if(!isNaN(n)&&n>=0)onUpdate({...meal,totalCalories:n,ingredients:ings});else setTotalVal(String(meal.totalCalories));setEditTotal(false);};
+
+  const mergeItems=async()=>{if(!addTranscript.trim())return;speech.stop();setAddLoading(true);setAddError("");
+    try{const r=await analyze(apiKey,null,addTranscript);
+      const rawIngs=r.ingredients||[{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0,sugarG:0,fiberG:0,servings:1}];
+      const merged=mergeWithFoodDB(rawIngs);
+      const newIngs=[...ings,...merged];
+      const {tot,prot,carbs,fat}=recalcTotal(newIngs);
+      setIngs(newIngs);setTotalVal(String(tot));
+      onUpdate({...meal,totalCalories:tot,totalProteinG:prot,totalCarbsG:carbs,totalFatG:fat,ingredients:newIngs});
+      setAddTranscript("");setAddingVoice(false);
+    }catch(e){setAddError(e.message||"Error");}
+    setAddLoading(false);
+  };
+
+  const handleIngredientSave=(idx,updatedIng)=>{
+    const newIngs=ings.map((x,i)=>i===idx?updatedIng:x);
+    setIngs(newIngs);
+    const {tot,prot,carbs,fat}=recalcTotal(newIngs);
+    setTotalVal(String(tot));
+    onUpdate({...meal,totalCalories:tot,totalProteinG:prot,totalCarbsG:carbs,totalFatG:fat,ingredients:newIngs});
+    recordFoodToDB(updatedIng);
+  };
+
+  const handleIngredientDelete=(idx,ingName)=>{
+    const newIngs=ings.filter((_,i)=>i!==idx);
+    setIngs(newIngs);
+    const {tot,prot,carbs,fat}=recalcTotal(newIngs);
+    onUpdate({...meal,totalCalories:tot,totalProteinG:prot,totalCarbsG:carbs,totalFatG:fat,ingredients:newIngs});
+    // remove from food db
+    const db=loadFoodDB();delete db[ingName?.toLowerCase()?.trim()];saveFoodDB(db);
+  };
+
+  // Swipeable ingredient row with inline calorie + servings editing
+  function IngRow({ing,idx,onTap,onDelete,onInlineEdit}) {
+    const [sx,setSx]=useState(0);const [sw,setSw]=useState(false);
+    const [editingCal,setEditingCal]=useState(false);
+    const [editingSrv,setEditingSrv]=useState(false);
+    const [calVal,setCalVal]=useState(String(ing.calories||0));
+    const [srvVal,setSrvVal]=useState(String(ing.servings||1));
+    const txRef2=useRef(0),tyRef2=useRef(0);
+    const onTS=e=>{txRef2.current=e.touches[0].clientX;tyRef2.current=e.touches[0].clientY;setSw(false);};
+    const onTM=e=>{const dx=e.touches[0].clientX-txRef2.current;const dy=Math.abs(e.touches[0].clientY-tyRef2.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<0){setSw(true);setSx(Math.max(dx,-88));}};
+    const onTE=()=>{if(sx<=-80)onDelete();else{setSx(0);setSw(false);}};
+
+    const commitCal=()=>{const n=parseFloat(calVal);if(!isNaN(n)&&n>=0)onInlineEdit({...ing,calories:n});else setCalVal(String(ing.calories||0));setEditingCal(false);};
+    const commitSrv=()=>{
+      const n=parseFloat(srvVal);
+      if(!isNaN(n)&&n>0&&ing.servings>0){
+        const ratio=n/ing.servings;
+        onInlineEdit({...ing,servings:n,calories:Math.round((ing.calories||0)*ratio),proteinG:parseFloat(((ing.proteinG||0)*ratio).toFixed(1)),carbsG:parseFloat(((ing.carbsG||0)*ratio).toFixed(1)),fatG:parseFloat(((ing.fatG||0)*ratio).toFixed(1)),sugarG:parseFloat(((ing.sugarG||0)*ratio).toFixed(1)),fiberG:parseFloat(((ing.fiberG||0)*ratio).toFixed(1))});
+      } else setSrvVal(String(ing.servings||1));
+      setEditingSrv(false);
+    };
+
+    return <div style={{position:"relative",borderBottom:`1px solid ${C.border}`}}>
+      <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:16}}>
+        <span style={{color:"#fff",fontSize:11,fontWeight:500}}>Delete</span>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:0,background:C.surface,transform:`translateX(${sx}px)`,transition:sw?"none":"transform .25s ease"}}
+        onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
+        {/* Tap name area to open full detail */}
+        <div style={{flex:1,minWidth:0,padding:"10px 10px 10px 14px",cursor:"pointer"}} onClick={()=>sx===0&&!editingCal&&!editingSrv&&onTap()}>
+          <div style={{fontSize:13,fontWeight:300,color:C.text,marginBottom:2}}>{ing.name}</div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            {/* Inline servings edit */}
+            <div style={{display:"flex",alignItems:"center",gap:3,background:C.hover,borderRadius:6,padding:"2px 6px"}} onClick={e=>{e.stopPropagation();setEditingSrv(true);setSrvVal(String(ing.servings||1));}}>
+              {editingSrv
+                ?<input autoFocus type="number" inputMode="decimal" style={{width:36,background:"transparent",border:"none",borderBottom:`1px solid ${C.accent}`,color:C.accent,fontSize:11,textAlign:"center",outline:"none",fontFamily:"'Inter',sans-serif"}} value={srvVal} onChange={e=>setSrvVal(e.target.value)} onBlur={commitSrv} onKeyDown={e=>e.key==="Enter"&&commitSrv()} onClick={e=>e.stopPropagation()}/>
+                :<span style={{fontSize:11,color:C.dim}}>{ing.servings||1} srv</span>
+              }
+            </div>
+            <Ic.ChevronRight s={10}/>
+            <span style={{fontSize:10,color:C.dim}}>tap for nutrition</span>
+          </div>
+        </div>
+        {/* Inline calorie edit */}
+        <div style={{padding:"10px 14px 10px 8px",display:"flex",alignItems:"center",gap:4,cursor:"pointer",flexShrink:0}} onClick={e=>{e.stopPropagation();setEditingCal(true);setCalVal(String(ing.calories||0));}}>
+          {editingCal
+            ?<input autoFocus type="number" inputMode="numeric" style={{width:54,background:"transparent",border:"none",borderBottom:`1.5px solid ${C.accent}`,color:C.accent,fontSize:13,fontWeight:400,textAlign:"right",outline:"none",fontFamily:"'Inter',sans-serif"}} value={calVal} onChange={e=>setCalVal(e.target.value)} onBlur={commitCal} onKeyDown={e=>e.key==="Enter"&&commitCal()} onClick={e=>e.stopPropagation()}/>
+            :<span style={{fontSize:13,fontWeight:400,color:C.accent}}>{ing.calories}</span>
+          }
+          <span style={{fontSize:9,color:"rgba(74,230,138,0.5)"}}>kcal</span>
+          {!editingCal&&<Ic.Edit s={10}/>}
+        </div>
+      </div>
+    </div>;
+  }
+
+  const macros=[
+    {l:"Protein",v:Math.round(meal.totalProteinG||0),c:C.blue},
+    {l:"Carbs",v:Math.round(meal.totalCarbsG||0),c:C.accent},
+    {l:"Fat",v:Math.round(meal.totalFatG||0),c:C.orange},
+    {l:"Sugar",v:Math.round(meal.totalSugarG||0),c:C.red},
+    {l:"Fiber",v:Math.round(meal.totalFiberG||0),c:C.purple}
+  ].filter(m=>m.v>0);
+
+  return <div style={{height:"100%",display:"flex",flexDirection:"column",background:C.bg,overflow:"hidden"}}>
+    <TopBar title={isW?"Workout":"Meal Detail"} onBack={onBack}/>
+    <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",paddingBottom:80}}>
+      {!isW&&meal.imageBase64&&<img src={`data:${meal.imageMime||"image/jpeg"};base64,${meal.imageBase64}`} style={{width:"100%",height:180,objectFit:"cover"}} alt=""/>}
+      {!isW&&!meal.imageBase64&&<div style={{width:"100%",height:120,background:C.surface,display:"flex",alignItems:"center",justifyContent:"center",fontSize:44}}>{meal.emoji||"🍽️"}</div>}
+      {isW&&<div style={{width:"100%",height:100,background:C.oDim,display:"flex",alignItems:"center",justifyContent:"center",fontSize:44}}>🔥</div>}
+
+      <div style={{padding:"14px 16px 0"}}>
+        <h2 style={{fontSize:18,fontWeight:400,color:isW?C.orange:C.text,marginBottom:2}}>{meal.mealTitle}</h2>
+        <p style={{fontSize:11,fontWeight:300,color:C.sub,lineHeight:1.5,marginBottom:2}}>{meal.summary}</p>
+        <p style={{fontSize:10,color:C.dim,marginBottom:14}}>{meal.time}</p>
+
+        <div style={{display:"flex",gap:10,marginBottom:12}}>
+          <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",background:isW?C.oDim:C.aDim,border:`1px solid ${isW?C.oMid:C.aMid}`,borderRadius:12,cursor:"pointer"}} onClick={()=>{setTotalVal(String(meal.totalCalories));setEditTotal(true);}}>
+            <span style={{fontSize:11,color:C.sub}}>{isW?"Burned":"Calories"}</span>
+            {editTotal
+              ?<input autoFocus type="number" inputMode="numeric" style={{width:70,background:"transparent",border:"none",borderBottom:`1.5px solid ${isW?C.orange:C.accent}`,color:isW?C.orange:C.accent,fontSize:20,fontWeight:300,fontFamily:"'Inter',sans-serif",outline:"none",textAlign:"right"}} value={totalVal} onChange={e=>setTotalVal(e.target.value)} onBlur={commitTotal} onKeyDown={e=>e.key==="Enter"&&commitTotal()} onClick={e=>e.stopPropagation()}/>
+              :<div style={{display:"flex",alignItems:"center",gap:3,color:isW?C.orange:C.accent}}><span style={{fontSize:20,fontWeight:300}}>{meal.totalCalories}</span><span style={{fontSize:9,opacity:.6}}>kcal</span><Ic.Edit s={10}/></div>
+            }
+          </div>
+        </div>
+
+        {!isW&&<Card style={{marginBottom:10}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px 4px",borderBottom:`1px solid ${C.border}`}}>
+            <p style={{fontSize:9,fontWeight:500,color:C.dim,textTransform:"uppercase",letterSpacing:"0.8px"}}>Breakdown — tap name for nutrition detail</p>
+            {!addingVoice&&<button style={{display:"flex",alignItems:"center",gap:3,background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:7,color:C.accent,fontSize:10,fontWeight:400,padding:"3px 8px"}} onClick={()=>{setAddingVoice(true);setAddTranscript("");setAddError("");setTimeout(()=>speech.start(),100);}}><Ic.Mic s={10}/> Add item</button>}
+          </div>
+          {ings.map((ing,idx)=>(
+            <IngRow key={idx} ing={ing} idx={idx}
+              onTap={()=>onOpenIngredient(ing,idx,(updatedIng)=>handleIngredientSave(idx,updatedIng),()=>handleIngredientDelete(idx,ing.name))}
+              onDelete={()=>handleIngredientDelete(idx,ing.name)}
+              onInlineEdit={(updatedIng)=>handleIngredientSave(idx,updatedIng)}/>
+          ))}
+          {ings.length===0&&<div style={{padding:"16px 14px",color:C.dim,fontSize:13}}>No ingredients listed.</div>}
+          {addingVoice&&<div style={{padding:"10px 13px",borderTop:`1px solid ${C.border}`}}>
+            <textarea style={{width:"100%",height:52,background:C.hover,border:`1px solid ${addTranscript?C.aMid:C.border}`,borderRadius:9,color:addTranscript?C.text:C.sub,fontSize:13,fontWeight:300,padding:"7px 11px",resize:"none",outline:"none",fontFamily:"'Inter',sans-serif",lineHeight:1.5,marginBottom:7}} placeholder="e.g. half tbsp butter…" value={addTranscript} onChange={e=>setAddTranscript(e.target.value)}/>
+            {addError&&<p style={{color:C.red,fontSize:11,marginBottom:5}}>{addError}</p>}
+            <div style={{display:"flex",gap:7}}>
+              <button style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,borderRadius:9,color:C.sub,fontSize:12,fontWeight:300,padding:"9px"}} onClick={()=>{speech.stop();setAddingVoice(false);}}>Cancel</button>
+              <button style={{flex:2,background:addLoading?C.hover:C.accent,borderRadius:9,border:"none",color:addLoading?C.accent:C.bg,fontSize:12,fontWeight:500,padding:"9px",opacity:addTranscript.trim()?1:0.35}} onClick={mergeItems} disabled={!addTranscript.trim()||addLoading}>{addLoading?"Calculating…":"Add →"}</button>
+            </div>
+          </div>}
+        </Card>}
+
+        {!isW&&macros.length>0&&<Card style={{marginBottom:12}}>
+          <div style={{padding:"8px 14px 4px",borderBottom:`1px solid ${C.border}`}}><p style={{fontSize:9,fontWeight:500,color:C.dim,textTransform:"uppercase",letterSpacing:"0.8px"}}>Nutrition Totals</p></div>
+          {macros.map(m=><div key={m.l} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",borderBottom:`1px solid ${C.border}`}}>
+            <span style={{fontSize:13,fontWeight:300,color:C.text}}>{m.l}</span>
+            <span style={{fontSize:13,fontWeight:400,color:m.c}}>{m.v}g</span>
+          </div>)}
+        </Card>}
+      </div>
     </div>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 16px",background:C.surface,transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
-      onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
-      <span style={{fontSize:14,fontWeight:300,color:C.text,flex:1}}>{ing.name}</span>
-      {editIdx===idx
-        ?<input autoFocus type="number" inputMode="numeric" style={{width:70,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:14,fontWeight:600,textAlign:"right",outline:"none",fontFamily:"'Inter',sans-serif"}} value={ingVal} onChange={e=>setIngVal(e.target.value)} onBlur={()=>commitIng(idx)} onKeyDown={e=>e.key==="Enter"&&commitIng(idx)}/>
-        :<div style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:C.sub}} onClick={()=>{setEditIdx(idx);setIngVal(String(ing.calories));}}><span style={{fontSize:13,fontWeight:300}}>{ing.calories} kcal{ing.proteinG?` · ${ing.proteinG}g`:""}</span><IcEdit/></div>
+
+    {/* Bottom action bar */}
+    <div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(13,13,20,0.97)",backdropFilter:"blur(20px)",borderTop:`1px solid ${C.border}`,padding:`12px 16px ${SAB}`,display:"flex",gap:10}}>
+      {confirmDelete
+        ?<><button style={{flex:1,height:46,borderRadius:12,background:"transparent",border:`1px solid ${C.border}`,color:C.sub,fontSize:13}} onClick={()=>setConfirmDelete(false)}>Cancel</button>
+           <button style={{flex:2,height:46,borderRadius:12,background:C.red,border:"none",color:"#fff",fontSize:13,fontWeight:500,display:"flex",alignItems:"center",justifyContent:"center",gap:6}} onClick={()=>onDelete(meal.id)}><Ic.Trash s={14}/> Confirm Delete</button></>
+        :<><button style={{height:46,width:46,borderRadius:12,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onBack}><Ic.Back/></button>
+           <button style={{flex:1,height:46,borderRadius:12,background:C.rDim,border:`1px solid ${C.rMid}`,color:C.red,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",gap:6}} onClick={()=>setConfirmDelete(true)}><Ic.Trash s={14}/> Delete meal</button></>
       }
     </div>
   </div>;
 }
 
-function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
-  const [ings,setIngs]=useState(meal.ingredients||[]);
-  const [editTotal,setEditTotal]=useState(false);
-  const [totalVal,setTotalVal]=useState(String(meal.totalCalories));
-  const [editIdx,setEditIdx]=useState(null);
-  const [ingVal,setIngVal]=useState("");
-  const [addingVoice,setAddingVoice]=useState(false);
-  const [addTranscript,setAddTranscript]=useState("");
-  const [addError,setAddError]=useState("");
-  const [addLoading,setAddLoading]=useState(false);
-  const isWorkout=meal.type==="workout";
-
-  const onUpdate2 = useCallback(t=>setAddTranscript(t),[]);
-  const speech = useWebSpeech(onUpdate2);
-  useEffect(()=>()=>speech.stop(),[]);
-
-  const commitTotal=()=>{const n=parseInt(totalVal);if(!isNaN(n)&&n>=0)onUpdate({...meal,totalCalories:n,ingredients:ings});else setTotalVal(String(meal.totalCalories));setEditTotal(false);};
-  const commitIng=idx=>{const n=parseInt(ingVal);if(!isNaN(n)&&n>=0){const next=ings.map((x,i)=>i===idx?{...x,calories:n}:x);setIngs(next);const tot=next.reduce((s,x)=>s+x.calories,0);setTotalVal(String(tot));onUpdate({...meal,totalCalories:tot,ingredients:next});}setEditIdx(null);};
-
-  const mergeItems = async () => {
-    if (!addTranscript.trim()) return;
-    speech.stop();
-    setAddLoading(true);
-    setAddError("");
-    try {
-      const r = await analyze(apiKey, null, addTranscript);
-      const newIngs = [...ings, ...(r.ingredients||[{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0}])];
-      const newTot = newIngs.reduce((s,x)=>s+x.calories,0);
-      const newProt = newIngs.reduce((s,x)=>s+(x.proteinG||0),0);
-      setIngs(newIngs);
-      setTotalVal(String(newTot));
-      onUpdate({...meal,totalCalories:newTot,totalProteinG:newProt,ingredients:newIngs});
-      setAddTranscript("");
-      setAddingVoice(false);
-    } catch(e) { setAddError(e.message||"Error — try again"); }
-    setAddLoading(false);
+// ─── PHOTO & VOICE SCREENS ────────────────────────────────────────────────────
+function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd,aiProps}) {
+  const [note,setNote]=useState("");const [error,setError]=useState("");const [submitting,setSubmitting]=useState(false);
+  const submit=async()=>{setError("");setSubmitting(true);
+    try{const r=await analyze(apiKey,imageData,note||undefined);
+      const ings=mergeWithFoodDB(r.ingredients||[]);
+      const now=new Date();
+      onAdd({id:uid(),mealTitle:r.mealTitle,totalCalories:r.totalCalories,totalProteinG:r.totalProteinG||0,totalCarbsG:r.totalCarbsG||0,totalFatG:r.totalFatG||0,totalSugarG:r.totalSugarG||0,totalFiberG:r.totalFiberG||0,ingredients:ings,summary:r.summary,imageBase64:imageData?.base64||null,imageMime:imageData?.mimeType||"image/jpeg",time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),addedAt:now.getTime(),emoji:r.emoji||null});
+    }catch(e){setError(e.message||"Failed");setSubmitting(false);}
   };
-
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 12px) 16px 12px"}}>
-      <button style={{width:44,height:44,borderRadius:12,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onBack}><IcBack/></button>
-      <span style={{fontSize:16,fontWeight:500,color:C.text}}>{isWorkout?"Workout":"Meal Details"}</span>
-      <button style={{width:44,height:44,borderRadius:12,background:C.rDim,border:`1px solid ${C.rMid}`,color:C.red,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>onDelete(meal.id)}><IcTrash/></button>
-    </div>
-    {!isWorkout&&(meal.imageBase64?<img src={`data:${meal.imageMime||"image/jpeg"};base64,${meal.imageBase64}`} style={{width:"100%",height:250,objectFit:"cover"}} alt=""/>:<div style={{width:"100%",height:180,background:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:56}}>{meal.emoji||"🍽️"}</span></div>)}
-    {isWorkout&&<div style={{width:"100%",height:140,background:C.oDim,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:64}}>🔥</span></div>}
-    <div style={{padding:"20px 20px 40px"}}>
-      <h2 style={{fontSize:22,fontWeight:400,color:isWorkout?C.orange:C.text,marginBottom:6,letterSpacing:"-0.3px"}}>{meal.mealTitle}</h2>
-      <p style={{fontSize:13,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:5}}>{meal.summary}</p>
-      <p style={{fontSize:11,color:C.dim,marginBottom:20}}>{meal.time}</p>
-      <div style={{display:"flex",gap:10,marginBottom:18}}>
-        <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",background:isWorkout?C.oDim:C.aDim,border:`1px solid ${isWorkout?C.oMid:C.aMid}`,borderRadius:16,cursor:"pointer"}} onClick={()=>{setTotalVal(String(meal.totalCalories));setEditTotal(true);}}>
-          <span style={{fontSize:13,fontWeight:400,color:C.text}}>{isWorkout?"Calories Burned":"Calories"}</span>
-          {editTotal
-            ?<input autoFocus type="number" inputMode="numeric" style={{width:80,background:"transparent",border:"none",borderBottom:`2px solid ${isWorkout?C.orange:C.accent}`,color:isWorkout?C.orange:C.accent,fontSize:26,fontWeight:200,fontFamily:"'Inter',sans-serif",outline:"none",textAlign:"right"}} value={totalVal} onChange={e=>setTotalVal(e.target.value)} onBlur={commitTotal} onKeyDown={e=>e.key==="Enter"&&commitTotal()} onClick={e=>e.stopPropagation()}/>
-            :<div style={{display:"flex",alignItems:"center",gap:5,color:isWorkout?C.orange:C.accent}}><span style={{fontSize:26,fontWeight:200,letterSpacing:"-1.5px"}}>{meal.totalCalories}</span><span style={{fontSize:11,opacity:0.7}}>kcal</span><IcEdit size={13}/></div>
-          }
-        </div>
-        {!isWorkout&&(meal.totalProteinG||0)>0&&<div style={{padding:"16px 14px",background:"rgba(96,200,245,0.1)",border:"1px solid rgba(96,200,245,0.3)",borderRadius:16,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minWidth:72}}>
-          <span style={{fontSize:20,fontWeight:200,color:"#60C8F5",letterSpacing:"-0.5px"}}>{Math.round(meal.totalProteinG||0)}g</span>
-          <span style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:1}}>protein</span>
-        </div>}
-      </div>
-
-      {!isWorkout&&<div style={{background:C.surface,borderRadius:16,border:`1px solid ${C.border}`,overflow:"hidden",marginBottom:12}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px 8px"}}>
-          <p style={{fontSize:11,fontWeight:400,color:C.sub,textTransform:"uppercase",letterSpacing:"1.2px"}}>Breakdown</p>
-          {!addingVoice&&<button style={{display:"flex",alignItems:"center",gap:5,background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:8,color:C.accent,fontSize:11,fontWeight:500,padding:"5px 10px"}} onClick={()=>{setAddingVoice(true);setAddTranscript("");setAddError("");setTimeout(()=>speech.start(),100);}}>
-            <IcMic size={12}/> Add item
-          </button>}
-        </div>
-        {ings.map((ing,idx)=><SwipeIngRow key={idx} ing={ing} idx={idx} editIdx={editIdx} ingVal={ingVal} setIngVal={setIngVal} setEditIdx={setEditIdx} commitIng={commitIng} onDelete={i=>{const next=ings.filter((_,j)=>j!==i);setIngs(next);const tot=next.reduce((s,x)=>s+x.calories,0);setTotalVal(String(tot));onUpdate({...meal,totalCalories:tot,ingredients:next});}}/>)}
-
-        {addingVoice&&<div style={{padding:"12px 14px",borderTop:`1px solid ${C.border}`}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-            <div onClick={speech.listening?speech.stop:speech.start}
-              style={{width:36,height:36,borderRadius:"50%",flexShrink:0,background:speech.listening?"rgba(255,68,68,0.12)":C.aDim,border:`2px solid ${speech.listening?C.red:C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
-              <div style={{color:speech.listening?C.red:C.accent}}>{speech.listening?<IcStop size={12}/>:<IcMic size={14}/>}</div>
-            </div>
-            {speech.listening
-              ?<div style={{flex:1,height:32}}><VoiceVisualizer active={true} mediaStream={null}/></div>
-              :<span style={{flex:1,fontSize:12,color:C.sub}}>Tap mic or type what to add</span>
-            }
-          </div>
-          <textarea style={{width:"100%",height:60,background:C.hover,border:`1px solid ${addTranscript?C.aMid:C.border}`,borderRadius:10,color:addTranscript?C.text:C.sub,fontSize:13,padding:"8px 12px",resize:"none",outline:"none",fontFamily:"'Inter',sans-serif",lineHeight:1.5,marginBottom:8}}
-            placeholder="e.g. half tablespoon of butter…"
-            value={addTranscript} onChange={e=>setAddTranscript(e.target.value)}/>
-          {addError&&<p style={{color:C.red,fontSize:12,marginBottom:6}}>{addError}</p>}
-          <div style={{display:"flex",gap:8}}>
-            <button style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,borderRadius:10,color:C.sub,fontSize:13,fontWeight:600,padding:"10px"}} onClick={()=>{speech.stop();setAddingVoice(false);setAddTranscript("");setAddError("");}}>Cancel</button>
-            <button style={{flex:2,background:addLoading?"transparent":C.accent,border:addLoading?`1px solid ${C.aMid}`:"none",borderRadius:10,color:addLoading?C.accent:C.bg,fontSize:13,fontWeight:500,padding:"10px",opacity:addTranscript.trim()?1:0.35}} onClick={mergeItems} disabled={!addTranscript.trim()||addLoading}>
-              {addLoading?"Calculating…":"Add to meal →"}
-            </button>
-          </div>
-        </div>}
-      </div>}
+  if(submitting&&!error)return <Spinner text="Analyzing with GPT-4o…"/>;
+  return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column"}}>
+    <TopBar title="Add Meal" onBack={onBack} rightEl={<AIButton {...aiProps}/>}/>
+    {imagePreview&&<div style={{flex:1,minHeight:0,padding:"8px 16px"}}><img src={imagePreview} style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:12,border:`1px solid ${C.border}`}} alt=""/></div>}
+    <div style={{flexShrink:0,padding:`0 16px ${SAB}`,display:"flex",flexDirection:"column",gap:8,paddingBottom:"calc(env(safe-area-inset-bottom,16px)+12px)"}}>
+      <textarea style={{width:"100%",height:64,background:C.surface,border:`1px solid ${note?C.aMid:C.border}`,borderRadius:10,color:note?C.text:C.sub,fontSize:13,fontWeight:300,padding:"10px 13px",resize:"none",outline:"none",fontFamily:"'Inter',sans-serif",lineHeight:1.55}} placeholder="Add notes — ingredients, portions, brand…" value={note} onChange={e=>setNote(e.target.value)}/>
+      {error&&<div style={{background:C.rDim,border:`1px solid ${C.rMid}`,borderRadius:9,padding:"10px 13px"}}><p style={{color:C.red,fontSize:13}}>{error}</p></div>}
+      <button style={{width:"100%",background:C.accent,border:"none",borderRadius:11,color:C.bg,fontSize:15,fontWeight:500,padding:"13px"}} onClick={submit}>{error?"Retry →":"Analyze & Add →"}</button>
     </div>
   </div>;
 }
 
+function VoiceScreen({apiKey,onBack,onAdd,aiProps}) {
+  const [transcript,setTranscript]=useState("");const [error,setError]=useState("");const [submitting,setSubmitting]=useState(false);
+  const onUpdate=useCallback(t=>setTranscript(t),[]);
+  const speech=useWebSpeech(onUpdate);
+  useEffect(()=>{if(speech.supported)setTimeout(()=>speech.start(),200);return()=>speech.stop();},[]);
+  const submit=async()=>{if(!transcript.trim())return;speech.stop();setSubmitting(true);
+    try{const r=await analyze(apiKey,null,transcript);
+      const ings=mergeWithFoodDB(r.ingredients||[]);
+      const now=new Date();
+      onAdd({id:uid(),mealTitle:r.mealTitle,totalCalories:r.totalCalories,totalProteinG:r.totalProteinG||0,totalCarbsG:r.totalCarbsG||0,totalFatG:r.totalFatG||0,totalSugarG:r.totalSugarG||0,totalFiberG:r.totalFiberG||0,ingredients:ings,summary:r.summary,imageBase64:null,time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),addedAt:now.getTime(),emoji:r.emoji||"🍽️"});
+    }catch(e){setError(e.message||"Error");setSubmitting(false);}
+  };
+  if(submitting)return <Spinner text="Calculating calories…"/>;
+  return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column"}}>
+    <TopBar title="Voice Log" onBack={()=>{speech.stop();onBack();}} rightEl={<AIButton {...aiProps}/>}/>
+    <div style={{flex:1,overflowY:"auto",padding:"16px 18px 28px"}}>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12,paddingTop:8}}>
+        <div onClick={speech.listening?speech.stop:speech.start} style={{width:80,height:80,borderRadius:"50%",background:speech.listening?"rgba(255,68,68,0.1)":C.aDim,border:`1.5px solid ${speech.listening?C.red:C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all .3s",color:speech.listening?C.red:C.accent}}>
+          {speech.listening?<Ic.Stop s={24}/>:<Ic.Mic s={32}/>}
+        </div>
+        <p style={{fontSize:13,fontWeight:300,color:speech.listening?C.red:C.sub,textAlign:"center"}}>{speech.listening?"Listening…":"Tap mic to speak"}</p>
+      </div>
+      <textarea style={{width:"100%",minHeight:96,background:C.surface,border:`1px solid ${transcript?C.aMid:C.border}`,borderRadius:12,color:transcript?C.text:C.sub,fontSize:14,fontWeight:300,padding:"12px 14px",resize:"none",outline:"none",fontFamily:"'Inter',sans-serif",lineHeight:1.65,marginTop:16}} placeholder="Words appear here as you speak, or type what you ate…" value={transcript} onChange={e=>setTranscript(e.target.value)}/>
+      {error&&<p style={{color:C.red,fontSize:13,textAlign:"center",marginTop:10}}>{error}</p>}
+      <div style={{display:"flex",gap:10,marginTop:14}}>
+        {speech.listening&&<button style={{flexShrink:0,background:C.rDim,border:`1.5px solid ${C.red}`,borderRadius:11,color:C.red,fontSize:13,padding:"13px 12px",display:"flex",alignItems:"center",gap:5}} onClick={speech.stop}><Ic.Stop s={11}/> Stop</button>}
+        <button style={{flex:1,background:C.accent,border:"none",borderRadius:11,color:C.bg,fontSize:14,fontWeight:500,padding:"13px",opacity:transcript.trim()?1:0.3}} onClick={submit} disabled={!transcript.trim()}>Add to Log →</button>
+      </div>
+    </div>
+  </div>;
+}
+
+// ─── SETTINGS SCREEN ──────────────────────────────────────────────────────────
+function SettingsScreen({apiKey,onSave,onBack,widgetConfig,onConfigChange,aiProps}) {
+  const [val,setVal]=useState("");const [saved,setSaved]=useState(false);const [err,setErr]=useState("");
+  const masked=apiKey?`${apiKey.slice(0,14)}…${apiKey.slice(-4)}`:null;
+  const submit=()=>{const t=val.trim();if(!t){setErr("Please enter an API key");return;}onSave(t);setSaved(true);setVal("");setErr("");setTimeout(()=>setSaved(false),2500);};
+
+  // Customize section
+  const [custMsgs,setCustMsgs]=useState([{role:"ai",text:"Tell me what you want to add, remove, or rearrange."}]);
+  const [custInput,setCustInput]=useState("");const [custLoading,setCustLoading]=useState(false);
+  const custSend=async()=>{
+    const msg=custInput.trim();if(!msg)return;
+    setCustInput("");
+    const newMsgs=[...custMsgs,{role:"user",text:msg}];setCustMsgs(newMsgs);setCustLoading(true);
+    try{
+      const result=await aiChat(apiKey,widgetConfig,custMsgs,msg);
+      if(result.configChanges){
+        const next={...widgetConfig,...result.configChanges,options:{...widgetConfig.options,...(result.configChanges.options||{})}};
+        if(!next.visible.includes("meal_list"))next.visible.push("meal_list");
+        if(!next.order.includes("meal_list"))next.order.push("meal_list");
+        onConfigChange(next);
+      }
+      setCustMsgs([...newMsgs,{role:"ai",text:result.reply||"Done!"}]);
+    }catch{setCustMsgs([...newMsgs,{role:"ai",text:"Couldn't reach AI. Check connection."}]);}
+    setCustLoading(false);
+  };
+
+  return <div style={{height:"100%",display:"flex",flexDirection:"column",background:C.bg}}>
+    <TopBar title="Settings" onBack={onBack} rightEl={<AIButton {...aiProps}/>}/>
+    <div style={{flex:1,overflowY:"auto",padding:"12px 16px 32px",display:"flex",flexDirection:"column",gap:12}}>
+
+      {/* Customize widgets */}
+      <Card style={{padding:"14px"}}>
+        <div style={{fontSize:12,fontWeight:500,color:C.text,marginBottom:4,display:"flex",alignItems:"center",gap:6}}><Ic.Sparkles s={13}/> Customize Layout</div>
+        <p style={{fontSize:11,color:C.sub,marginBottom:10}}>Active: {widgetConfig.visible.map(id=>WIDGET_REGISTRY.find(r=>r.id===id)?.label||id).join(", ")}</p>
+        <div style={{background:C.hover,borderRadius:10,padding:"10px 12px",marginBottom:8,maxHeight:140,overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>
+          {custMsgs.map((m,i)=><div key={i} style={{display:"flex",flexDirection:m.role==="user"?"row-reverse":"row",gap:6}}>
+            <div style={{maxWidth:"85%",padding:"6px 10px",borderRadius:10,background:m.role==="user"?C.accent:C.surface,border:`1px solid ${m.role==="user"?"transparent":C.border}`}}>
+              <p style={{fontSize:12,fontWeight:300,color:m.role==="user"?"#0A0A0F":C.text,lineHeight:1.45}}>{m.text}</p>
+            </div>
+          </div>)}
+          {custLoading&&<div style={{display:"flex",gap:3,padding:"4px 6px"}}>{[0,1,2].map(i=><div key={i} style={{width:4,height:4,borderRadius:"50%",background:C.accent,animation:"pulse 1s ease infinite",animationDelay:`${i*.2}s`}}/>)}</div>}
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          <input style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:9,color:C.text,fontSize:13,fontWeight:300,padding:"8px 12px",outline:"none",fontFamily:"'Inter',sans-serif"}} placeholder="e.g. show all macros…" value={custInput} onChange={e=>setCustInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&custSend()}/>
+          <button onClick={custSend} disabled={!custInput.trim()||custLoading} style={{width:34,height:34,borderRadius:"50%",background:custInput.trim()?C.accent:C.aDim,border:"none",color:custInput.trim()?"#0A0A0F":C.dim,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16,fontWeight:600}}>↑</button>
+        </div>
+      </Card>
+
+      <Card style={{padding:"16px"}}>
+        <p style={{fontSize:13,fontWeight:400,color:C.text,marginBottom:6}}>OpenAI API Key</p>
+        {masked?<div style={{display:"flex",alignItems:"center",gap:5,marginBottom:9,padding:"7px 9px",background:C.aDim,borderRadius:7,border:`1px solid ${C.aMid}`}}><span style={{fontSize:10,color:C.accent}}>✓</span><span style={{fontSize:11,color:C.sub,fontFamily:"monospace"}}>{masked}</span></div>:<p style={{fontSize:11,color:C.red,marginBottom:9}}>⚠ No key — meals cannot be analyzed</p>}
+        <p style={{fontSize:11,color:C.sub,lineHeight:1.6,marginBottom:9}}>Get yours at <span style={{color:C.accent}}>platform.openai.com/api-keys</span></p>
+        <input type="password" placeholder={masked?"New key to replace…":"sk-..."} value={val} onChange={e=>{setVal(e.target.value);setErr("");setSaved(false);}} onKeyDown={e=>e.key==="Enter"&&submit()} style={{width:"100%",background:C.hover,border:`1px solid ${err?C.red:C.border}`,borderRadius:9,color:C.text,fontSize:14,fontWeight:300,padding:"10px 12px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:7}}/>
+        {err&&<p style={{color:C.red,fontSize:11,marginBottom:7}}>{err}</p>}
+        <button style={{width:"100%",background:saved?C.aDim:C.accent,border:saved?`1px solid ${C.aMid}`:"none",borderRadius:9,color:saved?C.accent:C.bg,fontSize:13,fontWeight:500,padding:"11px"}} onClick={submit}>{saved?"✓ Saved!":"Save Key"}</button>
+      </Card>
+
+      <Card style={{padding:"16px"}}>
+        <p style={{fontSize:13,fontWeight:400,color:C.text,marginBottom:6}}>About</p>
+        <p style={{fontSize:11,color:C.sub,lineHeight:1.7,fontWeight:300}}>Food photos analyzed by GPT-4o. Voice logging uses browser speech recognition. AI assistant uses Claude. All data stored on-device only.</p>
+      </Card>
+    </div>
+  </div>;
+}
+
+// ─── ONBOARDING ───────────────────────────────────────────────────────────────
+function OnboardingScreen({apiKey, widgetConfig, onConfigChange, onDone}) {
+  const [step,setStep]=useState(0); // 0=welcome, 1=customize
+  const [msgs,setMsgs]=useState([{role:"ai",text:"Welcome to Just Calories! 🎉\n\nI can customize what you see on your dashboard. You can add or remove widgets like:\n• Calorie ring\n• Macro bars (protein, carbs, fat)\n• Water tracker\n• Streak counter\n• 7-day history chart\n\nWant to set it up now, or explore on your own first?"}]);
+  const [input,setInput]=useState("");const [loading,setLoading]=useState(false);
+
+  const send=async()=>{
+    const msg=input.trim();if(!msg)return;
+    setInput("");
+    const newMsgs=[...msgs,{role:"user",text:msg}];setMsgs(newMsgs);setLoading(true);
+    try{
+      const result=await aiChat(apiKey,widgetConfig,msgs,msg);
+      if(result.configChanges){
+        const next={...widgetConfig,...result.configChanges,options:{...widgetConfig.options,...(result.configChanges.options||{})}};
+        if(!next.visible.includes("meal_list"))next.visible.push("meal_list");
+        if(!next.order.includes("meal_list"))next.order.push("meal_list");
+        onConfigChange(next);
+      }
+      setMsgs([...newMsgs,{role:"ai",text:result.reply||"Got it!"}]);
+    }catch{setMsgs([...newMsgs,{role:"ai",text:"I couldn't connect, but that's okay. You can customize later in Settings."}]);}
+    setLoading(false);
+  };
+
+  const chips=["Show all macros","Add water tracker","Add streak counter","Add history chart","Keep it simple"];
+
+  return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column"}}>
+    <div style={{padding:`${SAT} 20px 16px`,flexShrink:0,textAlign:"center"}}>
+      <div style={{fontSize:10,color:C.accent,letterSpacing:"2px",textTransform:"uppercase",marginBottom:6}}>Just Calories</div>
+      <h1 style={{fontSize:22,fontWeight:200,color:C.text,letterSpacing:"-0.5px"}}>Welcome!</h1>
+    </div>
+    <div style={{flex:1,overflowY:"auto",padding:"0 16px",display:"flex",flexDirection:"column",gap:10}}>
+      {msgs.map((m,i)=>(
+        <div key={i} style={{display:"flex",flexDirection:m.role==="user"?"row-reverse":"row",gap:8,alignItems:"flex-end",animation:"fadeIn .3s ease"}}>
+          {m.role==="ai"&&<div style={{width:24,height:24,borderRadius:"50%",background:C.aDim,border:`1px solid ${C.aMid}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ic.Sparkles s={12}/></div>}
+          <div style={{maxWidth:"82%",padding:"10px 13px",borderRadius:15,background:m.role==="user"?C.accent:C.surface,border:`1px solid ${m.role==="user"?"transparent":C.border}`,borderBottomLeftRadius:m.role==="ai"?4:15,borderBottomRightRadius:m.role==="user"?4:15}}>
+            <p style={{fontSize:13,fontWeight:300,lineHeight:1.55,color:m.role==="user"?"#0A0A0F":C.text,whiteSpace:"pre-wrap"}}>{m.text}</p>
+          </div>
+        </div>
+      ))}
+      {loading&&<div style={{display:"flex",gap:4,padding:"6px 0"}}>{[0,1,2].map(i=><div key={i} style={{width:5,height:5,borderRadius:"50%",background:C.accent,animation:"pulse 1s ease infinite",animationDelay:`${i*.2}s`}}/>)}</div>}
+    </div>
+    <div style={{padding:"8px 16px 6px",display:"flex",gap:6,flexWrap:"wrap",flexShrink:0}}>
+      {chips.map(c=><button key={c} onClick={()=>setInput(c)} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"5px 10px",fontSize:11,fontWeight:300,color:C.accent}}>{c}</button>)}
+    </div>
+    <div style={{padding:`8px 16px ${SAB}`,borderTop:`1px solid ${C.border}`,display:"flex",gap:8,alignItems:"flex-end",flexShrink:0}}>
+      <textarea style={{flex:1,background:C.surface,border:`1px solid ${input?C.aMid:C.border}`,borderRadius:12,color:C.text,fontSize:14,fontWeight:300,fontFamily:"'Inter',sans-serif",padding:"8px 12px",resize:"none",outline:"none",height:36,maxHeight:80,lineHeight:1.4}} placeholder="Tell me what to show…" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}/>
+      <button onClick={send} disabled={!input.trim()||loading} style={{width:34,height:34,borderRadius:"50%",background:input.trim()?C.accent:C.aDim,border:"none",color:input.trim()?"#0A0A0F":C.dim,fontSize:16,fontWeight:600}}>↑</button>
+    </div>
+    <button onClick={onDone} style={{margin:"0 16px",marginBottom:`calc(env(safe-area-inset-bottom,16px) + 12px)`,background:"transparent",border:`1px solid ${C.border}`,borderRadius:12,color:C.sub,fontSize:13,fontWeight:300,padding:"12px"}}>Skip — I'll customize later</button>
+  </div>;
+}
+
+// ─── API KEY SCREEN ───────────────────────────────────────────────────────────
+function ApiKeyScreen({onSave}) {
+  const [val,setVal]=useState("");const [err,setErr]=useState("");
+  const submit=()=>{if(!val.trim()){setErr("Please enter your API key");return;}onSave(val.trim());};
+  return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",background:C.bg}}>
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"40px 26px",width:"100%",maxWidth:380}}>
+      <div style={{fontSize:10,color:C.accent,fontWeight:300,letterSpacing:"2px",textTransform:"uppercase",marginBottom:16}}>Just Calories</div>
+      <h1 style={{fontSize:26,fontWeight:200,color:C.text,textAlign:"center",lineHeight:1.2,letterSpacing:"-0.5px",marginBottom:6}}>Your app,<br/>your rules.</h1>
+      <p style={{color:C.sub,fontSize:12,fontWeight:300,lineHeight:1.7,textAlign:"center",marginBottom:28}}>AI-powered food logging that adapts<br/>to exactly what you want to track.</p>
+      <div style={{width:"100%",background:C.surface,borderRadius:16,padding:"20px 16px",border:`1px solid ${C.border}`}}>
+        <p style={{color:C.sub,fontSize:12,fontWeight:300,lineHeight:1.7,textAlign:"center",marginBottom:12}}>Enter your OpenAI API key.<br/><span style={{color:C.accent}}>platform.openai.com/api-keys</span></p>
+        <input style={{width:"100%",background:C.hover,border:`1px solid ${err?C.red:C.border}`,borderRadius:9,color:C.text,fontSize:15,fontWeight:300,padding:"11px 13px",outline:"none",fontFamily:"'Inter',sans-serif"}} type="password" placeholder="sk-..." value={val} onChange={e=>{setVal(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&submit()}/>
+        {err&&<p style={{color:C.red,fontSize:11,marginTop:5}}>{err}</p>}
+        <button style={{width:"100%",background:C.accent,border:"none",borderRadius:11,color:C.bg,fontSize:14,fontWeight:500,padding:"13px",marginTop:10}} onClick={submit}>Get Started →</button>
+      </div>
+      <p style={{color:C.dim,fontSize:10,fontWeight:300,marginTop:12,textAlign:"center"}}>Stored only on this device.</p>
+    </div>
+  </div>;
+}
+
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
 function App() {
   const [apiKey,setApiKey]=useState(()=>loadKey());
-  const [screen,setScreen]=useState("home");
-
-  // Request mic permission once on first app load so iOS never prompts mid-session
-  useEffect(() => {
-    navigator.mediaDevices?.getUserMedia({ audio: true })
-      .then(s => s.getTracks().forEach(t => t.stop()))
-      .catch(() => {});
-  }, []);
+  const [onboarded,setOnboardedState]=useState(()=>loadOnboarded());
+  const [screen,setScreen]=useState("home"); // home, camera, voice, detail, settings, weightlog, ingredient
   const [baseGoal,setBaseGoal]=useState(()=>loadBaseGoal());
-  const [selected,setSelected]=useState(null);
+  const [selected,setSelected]=useState(null);  // selected meal
+  const [selectedIng,setSelectedIng]=useState(null); // {ing, idx, onSave, onDelete}
   const [camImg,setCamImg]=useState({imageData:null,preview:null});
+  const [widgetConfig,setWidgetConfig]=useState(()=>loadWidgetConfig());
+  const [aiOpen,setAiOpen]=useState(false);
   const dateKeyRef=useRef(fmtKey(new Date()));
-  const [,forceRender]=useState(0);
-  const bump=()=>forceRender(n=>n+1);
+  const [,bump]=useState(0);
+
+  const handleConfigChange=useCallback(cfg=>{setWidgetConfig(cfg);saveWidgetConfig(cfg);},[]);
   const dateKey=dateKeyRef.current;
   const meals=loadMeals(dateKey);
   const burned=meals.filter(m=>m.type==="workout").reduce((s,m)=>s+m.totalCalories,0);
   const effectiveGoal=baseGoal+burned;
-  const changeDate=d=>{const k=fmtKey(d);if(k===dateKeyRef.current)return;dateKeyRef.current=k;bump();};
+
+  const changeDate=d=>{const k=fmtKey(d);if(k===dateKeyRef.current)return;dateKeyRef.current=k;bump(n=>n+1);};
+
   const addMeal=async m=>{
-    recordFoodItems(m.ingredients);
-    const k=dateKeyRef.current;
-    let storable=m;
-    if(m.imageBase64){
-      const thumb=await makeThumbnail(m.imageBase64, m.imageMime||"image/jpeg", 120, 0.7);
-      storable={...m, imageBase64:thumb||null};
-    }
-    saveMeals(k,[...loadMeals(k),storable]);
-    setScreen("home");
-    bump();
+    (m.ingredients||[]).forEach(recordFoodToDB);
+    const k=dateKeyRef.current;let s=m;
+    if(m.imageBase64){const th=await makeThumbnail(m.imageBase64,m.imageMime||"image/jpeg",120,.7);s={...m,imageBase64:th||null};}
+    saveMeals(k,[...loadMeals(k),s]);setScreen("home");bump(n=>n+1);
   };
-  const addWorkout=w=>{const k=dateKeyRef.current;saveMeals(k,[...loadMeals(k),w]);bump();};
-  const updateMeal=m=>{recordFoodItems(m.ingredients);const k=dateKeyRef.current;saveMeals(k,loadMeals(k).map(x=>x.id===m.id?m:x));setSelected(m);bump();};
-  const deleteMeal=id=>{const k=dateKeyRef.current;saveMeals(k,loadMeals(k).filter(x=>x.id!==id));setScreen("home");bump();};
+  const addWorkout=w=>{const k=dateKeyRef.current;saveMeals(k,[...loadMeals(k),w]);bump(n=>n+1);};
+  const updateMeal=m=>{
+    (m.ingredients||[]).forEach(recordFoodToDB);
+    const k=dateKeyRef.current;saveMeals(k,loadMeals(k).map(x=>x.id===m.id?m:x));
+    setSelected(m);bump(n=>n+1);
+  };
+  const deleteMeal=id=>{const k=dateKeyRef.current;saveMeals(k,loadMeals(k).filter(x=>x.id!==id));setScreen("home");bump(n=>n+1);};
   const saveApiKey=k=>{saveKey(k);setApiKey(k);};
+
   const selectMeal=m=>{
-    if(m._quickEdit){const k=dateKeyRef.current;saveMeals(k,loadMeals(k).map(x=>x.id===m.id?{...x,totalCalories:m._newCal}:x));bump();return;}
-    if(m._delete){const k=dateKeyRef.current;saveMeals(k,loadMeals(k).filter(x=>x.id!==m.id));bump();return;}
+    if(m._quickEdit){const k=dateKeyRef.current;saveMeals(k,loadMeals(k).map(x=>x.id===m.id?{...x,totalCalories:m._newCal}:x));bump(n=>n+1);return;}
+    if(m._delete){const k=dateKeyRef.current;saveMeals(k,loadMeals(k).filter(x=>x.id!==m.id));bump(n=>n+1);return;}
     setSelected(m);setScreen("detail");
   };
 
-  if (!apiKey) return <ApiKeyScreen onSave={saveApiKey}/>;
+  const openIngredient=(ing,idx,onSave,onDelete)=>{
+    setSelectedIng({ing,idx,onSave,onDelete});
+    setScreen("ingredient");
+  };
 
-  return <div style={{height:"100%"}}>
-    {screen==="home"&&<HomeScreen
-      onOpenCamera={(imageData,preview)=>{setCamImg({imageData,preview});setScreen("camera");}}
-      onOpenVoice={()=>setScreen("voice")}
-      onAddWorkout={addWorkout} onSelectMeal={selectMeal}
-      onOpenSettings={()=>setScreen("settings")}
-      meals={meals} goal={effectiveGoal} baseGoal={baseGoal}
-      setBaseGoal={n=>{setBaseGoal(n);saveBaseGoal(n);}}
-      date={new Date(dateKey+"T12:00:00")} setDate={changeDate}
-    />}
-    {screen==="camera"&&<PhotoScreen apiKey={apiKey} imageData={camImg.imageData} imagePreview={camImg.preview} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
-    {screen==="voice"&&<VoiceScreen apiKey={apiKey} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
-    {screen==="detail"&&selected&&<DetailScreen meal={selected} onBack={()=>setScreen("home")} onUpdate={updateMeal} onDelete={deleteMeal} apiKey={apiKey}/>}
-    {screen==="settings"&&<SettingsScreen apiKey={apiKey} onSave={saveApiKey} onBack={()=>setScreen("home")}/>}
+  const aiProps = {onOpen:()=>setAiOpen(true)};
+
+  if(!apiKey)return <ApiKeyScreen onSave={k=>{saveKey(k);setApiKey(k);}}/>;
+  if(!onboarded)return <OnboardingScreen apiKey={apiKey} widgetConfig={widgetConfig} onConfigChange={handleConfigChange} onDone={()=>{setOnboarded();setOnboardedState(true);}}/>;
+
+  return <div style={{height:"100%",display:"flex",flexDirection:"column",position:"relative"}}>
+    <div style={{flex:1,overflow:"hidden"}}>
+      {screen==="home"&&<HomeScreen
+        onOpenCamera={(imageData,preview)=>{setCamImg({imageData,preview});setScreen("camera");}}
+        onOpenVoice={()=>setScreen("voice")}
+        onAddWorkout={addWorkout} onSelectMeal={selectMeal}
+        onOpenSettings={()=>setScreen("settings")}
+        meals={meals} goal={effectiveGoal} baseGoal={baseGoal} setBaseGoal={n=>{setBaseGoal(n);saveBaseGoal(n);}}
+        date={new Date(dateKey+"T12:00:00")} setDate={changeDate}
+        widgetConfig={widgetConfig} onConfigChange={handleConfigChange}
+        onOpenWeightLog={()=>setScreen("weightlog")}
+        aiProps={aiProps}
+      />}
+      {screen==="camera"&&<PhotoScreen apiKey={apiKey} imageData={camImg.imageData} imagePreview={camImg.preview} onBack={()=>setScreen("home")} onAdd={addMeal} aiProps={aiProps}/>}
+      {screen==="voice"&&<VoiceScreen apiKey={apiKey} onBack={()=>setScreen("home")} onAdd={addMeal} aiProps={aiProps}/>}
+      {screen==="detail"&&selected&&<DetailScreen meal={selected} onBack={()=>setScreen("home")} onUpdate={updateMeal} onDelete={deleteMeal} apiKey={apiKey} onOpenIngredient={openIngredient}/>}
+      {screen==="ingredient"&&selectedIng&&<IngredientDetailScreen ingredient={selectedIng.ing} onBack={()=>setScreen("detail")} onSave={selectedIng.onSave} onDelete={selectedIng.onDelete}/>}
+      {screen==="settings"&&<SettingsScreen apiKey={apiKey} onSave={saveApiKey} onBack={()=>setScreen("home")} widgetConfig={widgetConfig} onConfigChange={handleConfigChange} aiProps={aiProps}/>}
+      {screen==="weightlog"&&<WeightLogScreen onBack={()=>setScreen("home")} aiProps={aiProps}/>}
+    </div>
+    {aiOpen&&<AIDrawer apiKey={apiKey} widgetConfig={widgetConfig} onConfigChange={handleConfigChange} onAddMeal={addMeal} onClose={()=>setAiOpen(false)}/>}
   </div>;
 }
 
