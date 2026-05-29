@@ -301,14 +301,15 @@ function WeightSparkline({data}) {
 }
 
 function MealCard({meal,onTap,onQuickEdit,onDelete}) {
-  const [editing,setEditing]=useState(false);
-  const [val,setVal]=useState(String(meal.totalCalories));
   const [swipeX,setSwipeX]=useState(0);
   const [swiping,setSwiping]=useState(false);
   const tx=useRef(0),ty=useRef(0);
   const isWorkout=meal.type==="workout";
   const THRESHOLD=80;
-  const commit=()=>{const n=parseInt(val);if(!isNaN(n)&&n>=0)onQuickEdit(meal.id,n);else setVal(String(meal.totalCalories));setEditing(false);};
+  // Build a compact serving summary for the card, e.g. "Bread 1 srv · Bacon 2 srv"
+  const srvSummary = !isWorkout && meal.ingredients?.length
+    ? meal.ingredients.map(i=>`${i.name}${i.servings && i.servings!==1 ? ` ×${i.servings}` : ""}`).slice(0,3).join(" · ") + (meal.ingredients.length>3?" …":"")
+    : null;
   const onTS=e=>{tx.current=e.touches[0].clientX;ty.current=e.touches[0].clientY;setSwiping(false);};
   const onTM=e=>{const dx=e.touches[0].clientX-tx.current;const dy=Math.abs(e.touches[0].clientY-ty.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<0){setSwiping(true);setSwipeX(Math.max(dx,-(THRESHOLD+30)));}};
   const onTE=()=>{if(swipeX<=-THRESHOLD){onDelete(meal.id);}else{setSwipeX(0);setSwiping(false);}};
@@ -317,23 +318,26 @@ function MealCard({meal,onTap,onQuickEdit,onDelete}) {
       <span style={{color:"#fff",fontSize:13,fontWeight:400,marginRight:6}}>Delete</span><IcTrash/>
     </div>
     <div style={{display:"flex",alignItems:"center",gap:12,background:C.card,border:`1px solid ${isWorkout?C.oMid:C.border}`,borderRadius:16,padding:"12px 14px",cursor:"pointer",transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
-      onClick={()=>{if(!editing&&swipeX===0)onTap(meal);}}
+      onClick={()=>{if(swipeX===0)onTap(meal);}}
       onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
       {meal.imageBase64
-        ?<img src={`data:${meal.imageMime||"image/jpeg"};base64,${meal.imageBase64}`} style={{width:54,height:54,borderRadius:12,objectFit:"cover",flexShrink:0}} alt=""/>
-        :<div style={{width:54,height:54,borderRadius:12,background:isWorkout?C.oDim:C.hover,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:22}}>{isWorkout?"🔥":meal.emoji||"🍽️"}</span></div>
+        ?<img src={`data:${meal.imageMime||"image/jpeg"};base64,${meal.imageBase64}`} style={{width:48,height:48,borderRadius:10,objectFit:"cover",flexShrink:0}} alt=""/>
+        :<div style={{width:48,height:48,borderRadius:10,background:isWorkout?C.oDim:C.hover,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:20}}>{isWorkout?"🔥":meal.emoji||"🍽️"}</span></div>
       }
       <div style={{flex:1,minWidth:0}}>
-        <p style={{fontSize:14,fontWeight:400,color:isWorkout?C.orange:C.text,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{meal.mealTitle}</p>
-        <p style={{fontSize:11,fontWeight:300,color:C.sub,lineHeight:1.4,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{meal.summary}</p>
-        <p style={{fontSize:10,fontWeight:300,color:C.dim,marginTop:3}}>{meal.time}</p>
-      </div>
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1,padding:"8px 10px",background:isWorkout?C.oDim:C.aDim,borderRadius:12,minWidth:56,position:"relative",flexShrink:0}}
-        onClick={e=>{e.stopPropagation();setEditing(true);setVal(String(meal.totalCalories));}}>
-        {editing
-          ?<input autoFocus type="number" inputMode="numeric" style={{width:48,background:"transparent",border:"none",borderBottom:`2px solid ${isWorkout?C.orange:C.accent}`,color:isWorkout?C.orange:C.accent,fontSize:16,fontWeight:200,textAlign:"center",outline:"none",fontFamily:"'Inter',sans-serif"}} value={val} onChange={e=>setVal(e.target.value)} onBlur={commit} onKeyDown={e=>e.key==="Enter"&&commit()} onClick={e=>e.stopPropagation()}/>
-          :<><span style={{fontSize:16,fontWeight:200,color:isWorkout?C.orange:C.accent,letterSpacing:"-0.5px"}}>{isWorkout?"-":""}{meal.totalCalories}</span><span style={{fontSize:9,color:isWorkout?C.oMid:C.aMid,textTransform:"uppercase"}}>{isWorkout?"burned":"kcal"}</span><span style={{position:"absolute",top:4,right:4,color:isWorkout?C.oMid:C.aMid}}><IcEdit/></span></>
+        <p style={{fontSize:13,fontWeight:400,color:isWorkout?C.orange:C.text,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{meal.mealTitle}</p>
+        {srvSummary
+          ? <p style={{fontSize:11,fontWeight:300,color:C.sub,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:1}}>{srvSummary}</p>
+          : <p style={{fontSize:11,fontWeight:300,color:C.sub,lineHeight:1.4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{meal.summary}</p>
         }
+        <p style={{fontSize:10,fontWeight:300,color:C.dim,marginTop:2}}>{meal.time}</p>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:2,flexShrink:0,paddingLeft:8}}>
+        <div style={{display:"flex",alignItems:"baseline",gap:3,padding:"6px 10px",background:isWorkout?C.oDim:C.aDim,borderRadius:10}}>
+          <span style={{fontSize:18,fontWeight:200,color:isWorkout?C.orange:C.accent,letterSpacing:"-0.5px"}}>{isWorkout?"-":""}{meal.totalCalories}</span>
+          <span style={{fontSize:9,fontWeight:300,color:isWorkout?C.oMid:C.aMid,textTransform:"uppercase"}}>cal</span>
+        </div>
+        {!isWorkout&&(meal.totalProteinG||0)>0&&<span style={{fontSize:10,fontWeight:300,color:"rgba(96,200,245,0.7)"}}>{Math.round(meal.totalProteinG||0)}g pro</span>}
       </div>
     </div>
   </div>;
@@ -762,28 +766,36 @@ function SwipeIngRow({ing,idx,editIdx,servVal,setServVal,setEditIdx,commitServ,o
   const onTM=e=>{const dx=e.touches[0].clientX-tx.current;const dy=Math.abs(e.touches[0].clientY-ty.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<0){setSwiping(true);setSwipeX(Math.max(dx,-(THRESHOLD+20)));}};
   const onTE=()=>{if(swipeX<=-THRESHOLD)onDelete(idx);else{setSwipeX(0);setSwiping(false);}};
   const servings = ing.servings ?? 1;
-  const baseCalories = ing.baseCalories ?? ing.calories;
   const isEditing = editIdx===idx;
   return <div style={{position:"relative",overflow:"hidden",borderTop:`1px solid ${C.border}`}}>
     <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:16}}>
       <span style={{color:"#fff",fontSize:12,fontWeight:400,marginRight:4}}>Delete</span><IcTrash/>
     </div>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 16px",background:C.surface,transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
+    <div style={{padding:"10px 16px",background:C.surface,transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
       onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
-      <div style={{flex:1,minWidth:0}}>
-        <span style={{fontSize:14,fontWeight:300,color:C.text}}>{ing.name}</span>
-        <div style={{fontSize:11,fontWeight:300,color:C.dim,marginTop:1}}>{ing.calories} kcal{ing.proteinG?` · ${Math.round(ing.proteinG)}g protein`:""}</div>
+      {/* Name — small, light, top */}
+      <p style={{fontSize:11,fontWeight:300,color:C.sub,marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ing.name}</p>
+      {/* Servings + Calories row — large, tappable */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        {/* Servings block */}
+        <div style={{display:"flex",alignItems:"baseline",gap:4,cursor:"pointer"}} onClick={()=>{if(!isEditing){setEditIdx(idx);setServVal(String(servings));}}}>
+          <span style={{fontSize:10,fontWeight:300,color:C.dim,marginRight:2}}>SRV</span>
+          {isEditing
+            ?<input autoFocus type="number" inputMode="decimal"
+                style={{width:56,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:22,fontWeight:200,textAlign:"left",outline:"none",fontFamily:"'Inter',sans-serif",letterSpacing:"-0.5px",padding:0}}
+                value={servVal} onChange={e=>setServVal(e.target.value)}
+                onBlur={()=>commitServ(idx)} onKeyDown={e=>e.key==="Enter"&&commitServ(idx)}/>
+            :<span style={{fontSize:22,fontWeight:200,color:C.text,letterSpacing:"-0.5px"}}>{servings}</span>
+          }
+          {!isEditing&&<span style={{color:C.dim,display:"inline-flex",alignItems:"center",marginLeft:2}}><IcEdit size={11}/></span>}
+        </div>
+        {/* Calories block */}
+        <div style={{display:"flex",alignItems:"baseline",gap:4}}>
+          <span style={{fontSize:10,fontWeight:300,color:C.dim,marginRight:2}}>CAL</span>
+          <span style={{fontSize:22,fontWeight:200,color:C.accent,letterSpacing:"-0.5px"}}>{ing.calories}</span>
+          {(ing.proteinG||0)>0&&<span style={{fontSize:10,fontWeight:300,color:"rgba(96,200,245,0.6)",marginLeft:6}}>{Math.round(ing.proteinG)}g pro</span>}
+        </div>
       </div>
-      {isEditing
-        ?<div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-          <input autoFocus type="number" inputMode="decimal" style={{width:64,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:14,fontWeight:300,textAlign:"right",outline:"none",fontFamily:"'Inter',sans-serif"}} value={servVal} onChange={e=>setServVal(e.target.value)} onBlur={()=>commitServ(idx)} onKeyDown={e=>e.key==="Enter"&&commitServ(idx)}/>
-          <span style={{fontSize:11,fontWeight:300,color:C.sub,flexShrink:0}}>srv</span>
-        </div>
-        :<div style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:C.sub,flexShrink:0}} onClick={()=>{setEditIdx(idx);setServVal(String(servings));}}>
-          <span style={{fontSize:13,fontWeight:300}}>{servings === Math.floor(servings) ? servings : servings} srv</span>
-          <IcEdit/>
-        </div>
-      }
     </div>
   </div>;
 }
