@@ -186,6 +186,16 @@ function Spinner({text}) {
   </div>;
 }
 
+// Pre-request mic permission at script load so iOS never prompts mid-session.
+// This runs once immediately when the page loads, caches the grant for the session.
+(function(){
+  if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
+    navigator.mediaDevices.getUserMedia({audio:true})
+      .then(s=>{s.getTracks().forEach(t=>t.stop());})
+      .catch(()=>{});
+  }
+})();
+
 // ─── FIX 3: VoiceVisualizer no longer calls getUserMedia itself ───────────────
 // Accepts mediaStream prop from parent. If no stream given, renders animated
 // placeholder bars — zero extra permission prompts.
@@ -435,7 +445,7 @@ function ApiKeyScreen({onSave}) {
   </div>;
 }
 
-function HomeScreen({onOpenCamera,onOpenVoice,onSelectMeal,onAddWorkout,onOpenSettings,meals,goal,baseGoal,setBaseGoal,date,setDate}) {
+function HomeScreen({onOpenCamera,onOpenVoice,onSelectMeal,onAddWorkout,onOpenSettings,onOpenWeightHistory,meals,goal,baseGoal,setBaseGoal,date,setDate}) {
   const [editGoal,setEditGoal]=useState(false);
   const [goalVal,setGoalVal]=useState(String(baseGoal));
   const [weightLog,setWeightLog]=useState(()=>loadWeights());
@@ -491,10 +501,13 @@ function HomeScreen({onOpenCamera,onOpenVoice,onSelectMeal,onAddWorkout,onOpenSe
         </div>
       </div>
       <div style={{flex:1,minWidth:0,overflow:"hidden",display:"flex",flexDirection:"column",gap:3,padding:"16px 18px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:18}}>
-        <span style={{fontSize:9,fontWeight:400,color:C.dim,textTransform:"uppercase",letterSpacing:"1px",marginBottom:2}}>Weight</span>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+          <span style={{fontSize:9,fontWeight:400,color:C.dim,textTransform:"uppercase",letterSpacing:"1px"}}>Weight</span>
+          <button style={{background:"none",border:"none",color:C.dim,padding:0,display:"flex",alignItems:"center"}} onClick={onOpenWeightHistory}><IcRight/></button>
+        </div>
         <div style={{display:"flex",alignItems:"baseline",gap:3}}>
           {editWeight
-            ?<input autoFocus style={{background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:26,fontWeight:200,fontFamily:"'Inter',sans-serif",letterSpacing:"-1.5px",outline:"none",padding:0,width:80,lineHeight:1}} placeholder="0" value={weightVal} onChange={e=>setWeightVal(e.target.value)} onBlur={commitWeight} onKeyDown={e=>e.key==="Enter"&&commitWeight()}/>
+            ?<input autoFocus type="number" inputMode="decimal" style={{background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:26,fontWeight:200,fontFamily:"'Inter',sans-serif",letterSpacing:"-1.5px",outline:"none",padding:0,width:80,lineHeight:1}} placeholder="0" value={weightVal} onChange={e=>setWeightVal(e.target.value)} onBlur={commitWeight} onKeyDown={e=>e.key==="Enter"&&commitWeight()}/>
             :<span style={{fontSize:26,fontWeight:200,color:C.text,letterSpacing:"-1.5px",lineHeight:1,cursor:"pointer"}} onClick={()=>{setWeightVal(latestW>0?String(latestW):"");setEditWeight(true);}}>{latestW>0?latestW:"—"}</span>
           }
           {!editWeight&&<span style={{color:C.dim,cursor:"pointer",display:"inline-flex",alignItems:"center",marginLeft:2}} onClick={()=>{setWeightVal(latestW>0?String(latestW):"");setEditWeight(true);}}><IcEdit/></span>}
@@ -739,33 +752,54 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
   </div>;
 }
 
-function SwipeIngRow({ing,idx,editIdx,ingVal,setIngVal,setEditIdx,commitIng,onDelete}) {
+// Each ingredient stores: name, calories (current total), proteinG (current total),
+// baseCalories (per-serving), baseProteinG (per-serving), servings (float)
+// If baseCalories not set (legacy), treat calories as base with 1 serving.
+function SwipeIngRow({ing,idx,editIdx,servVal,setServVal,setEditIdx,commitServ,onDelete}) {
   const [swipeX,setSwipeX]=useState(0);const[swiping,setSwiping]=useState(false);
   const tx=useRef(0),ty=useRef(0);const THRESHOLD=70;
   const onTS=e=>{tx.current=e.touches[0].clientX;ty.current=e.touches[0].clientY;setSwiping(false);};
   const onTM=e=>{const dx=e.touches[0].clientX-tx.current;const dy=Math.abs(e.touches[0].clientY-ty.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<0){setSwiping(true);setSwipeX(Math.max(dx,-(THRESHOLD+20)));}};
   const onTE=()=>{if(swipeX<=-THRESHOLD)onDelete(idx);else{setSwipeX(0);setSwiping(false);}};
+  const servings = ing.servings ?? 1;
+  const baseCalories = ing.baseCalories ?? ing.calories;
+  const isEditing = editIdx===idx;
   return <div style={{position:"relative",overflow:"hidden",borderTop:`1px solid ${C.border}`}}>
     <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:16}}>
       <span style={{color:"#fff",fontSize:12,fontWeight:400,marginRight:4}}>Delete</span><IcTrash/>
     </div>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 16px",background:C.surface,transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
       onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
-      <span style={{fontSize:14,fontWeight:300,color:C.text,flex:1}}>{ing.name}</span>
-      {editIdx===idx
-        ?<input autoFocus type="number" inputMode="numeric" style={{width:70,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:14,fontWeight:600,textAlign:"right",outline:"none",fontFamily:"'Inter',sans-serif"}} value={ingVal} onChange={e=>setIngVal(e.target.value)} onBlur={()=>commitIng(idx)} onKeyDown={e=>e.key==="Enter"&&commitIng(idx)}/>
-        :<div style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:C.sub}} onClick={()=>{setEditIdx(idx);setIngVal(String(ing.calories));}}><span style={{fontSize:13,fontWeight:300}}>{ing.calories} kcal{ing.proteinG?` · ${ing.proteinG}g`:""}</span><IcEdit/></div>
+      <div style={{flex:1,minWidth:0}}>
+        <span style={{fontSize:14,fontWeight:300,color:C.text}}>{ing.name}</span>
+        <div style={{fontSize:11,fontWeight:300,color:C.dim,marginTop:1}}>{ing.calories} kcal{ing.proteinG?` · ${Math.round(ing.proteinG)}g protein`:""}</div>
+      </div>
+      {isEditing
+        ?<div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+          <input autoFocus type="number" inputMode="decimal" style={{width:64,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:14,fontWeight:300,textAlign:"right",outline:"none",fontFamily:"'Inter',sans-serif"}} value={servVal} onChange={e=>setServVal(e.target.value)} onBlur={()=>commitServ(idx)} onKeyDown={e=>e.key==="Enter"&&commitServ(idx)}/>
+          <span style={{fontSize:11,fontWeight:300,color:C.sub,flexShrink:0}}>srv</span>
+        </div>
+        :<div style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:C.sub,flexShrink:0}} onClick={()=>{setEditIdx(idx);setServVal(String(servings));}}>
+          <span style={{fontSize:13,fontWeight:300}}>{servings === Math.floor(servings) ? servings : servings} srv</span>
+          <IcEdit/>
+        </div>
       }
     </div>
   </div>;
 }
 
 function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
-  const [ings,setIngs]=useState(meal.ingredients||[]);
+  const normalise = ings => ings.map(ing=>({
+    ...ing,
+    baseCalories: ing.baseCalories ?? ing.calories,
+    baseProteinG: ing.baseProteinG ?? (ing.proteinG||0),
+    servings: ing.servings ?? 1,
+  }));
+  const [ings,setIngs]=useState(()=>normalise(meal.ingredients||[]));
   const [editTotal,setEditTotal]=useState(false);
   const [totalVal,setTotalVal]=useState(String(meal.totalCalories));
   const [editIdx,setEditIdx]=useState(null);
-  const [ingVal,setIngVal]=useState("");
+  const [servVal,setServVal]=useState("");
   const [addingVoice,setAddingVoice]=useState(false);
   const [addTranscript,setAddTranscript]=useState("");
   const [addError,setAddError]=useState("");
@@ -776,8 +810,29 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
   const speech = useWebSpeech(onUpdate2);
   useEffect(()=>()=>speech.stop(),[]);
 
+  const save = (newIngs) => {
+    const newTot = Math.round(newIngs.reduce((s,x)=>s+x.calories,0));
+    const newProt = newIngs.reduce((s,x)=>s+(x.proteinG||0),0);
+    setTotalVal(String(newTot));
+    onUpdate({...meal, totalCalories:newTot, totalProteinG:newProt, ingredients:newIngs});
+  };
+
   const commitTotal=()=>{const n=parseInt(totalVal);if(!isNaN(n)&&n>=0)onUpdate({...meal,totalCalories:n,ingredients:ings});else setTotalVal(String(meal.totalCalories));setEditTotal(false);};
-  const commitIng=idx=>{const n=parseInt(ingVal);if(!isNaN(n)&&n>=0){const next=ings.map((x,i)=>i===idx?{...x,calories:n}:x);setIngs(next);const tot=next.reduce((s,x)=>s+x.calories,0);setTotalVal(String(tot));onUpdate({...meal,totalCalories:tot,ingredients:next});}setEditIdx(null);};
+
+  const commitServ = idx => {
+    const n = parseFloat(servVal);
+    if (!isNaN(n) && n > 0) {
+      const next = ings.map((x,i) => {
+        if (i !== idx) return x;
+        const newCal = Math.round(x.baseCalories * n);
+        const newProt = Math.round((x.baseProteinG||0) * n * 10) / 10;
+        return {...x, servings:n, calories:newCal, proteinG:newProt};
+      });
+      setIngs(next);
+      save(next);
+    }
+    setEditIdx(null);
+  };
 
   const mergeItems = async () => {
     if (!addTranscript.trim()) return;
@@ -786,12 +841,10 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     setAddError("");
     try {
       const r = await analyze(apiKey, null, addTranscript);
-      const newIngs = [...ings, ...(r.ingredients||[{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0}])];
-      const newTot = newIngs.reduce((s,x)=>s+x.calories,0);
-      const newProt = newIngs.reduce((s,x)=>s+(x.proteinG||0),0);
+      const raw = r.ingredients||[{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0}];
+      const newIngs = [...ings, ...normalise(raw)];
       setIngs(newIngs);
-      setTotalVal(String(newTot));
-      onUpdate({...meal,totalCalories:newTot,totalProteinG:newProt,ingredients:newIngs});
+      save(newIngs);
       setAddTranscript("");
       setAddingVoice(false);
     } catch(e) { setAddError(e.message||"Error — try again"); }
@@ -831,7 +884,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
             <IcMic size={12}/> Add item
           </button>}
         </div>
-        {ings.map((ing,idx)=><SwipeIngRow key={idx} ing={ing} idx={idx} editIdx={editIdx} ingVal={ingVal} setIngVal={setIngVal} setEditIdx={setEditIdx} commitIng={commitIng} onDelete={i=>{const next=ings.filter((_,j)=>j!==i);setIngs(next);const tot=next.reduce((s,x)=>s+x.calories,0);setTotalVal(String(tot));onUpdate({...meal,totalCalories:tot,ingredients:next});}}/>)}
+        {ings.map((ing,idx)=><SwipeIngRow key={idx} ing={ing} idx={idx} editIdx={editIdx} servVal={servVal} setServVal={setServVal} setEditIdx={setEditIdx} commitServ={commitServ} onDelete={i=>{const next=ings.filter((_,j)=>j!==i);setIngs(next);save(next);}}/>)}
 
         {addingVoice&&<div style={{padding:"12px 14px",borderTop:`1px solid ${C.border}`}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
@@ -860,16 +913,83 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
   </div>;
 }
 
+function WeightHistoryScreen({onBack}) {
+  const [log,setLog]=useState(()=>{
+    const all=loadWeights();
+    const cutoff=new Date();cutoff.setDate(cutoff.getDate()-30);
+    return all.filter(w=>w.date>=fmtKey(cutoff)).sort((a,b)=>b.date.localeCompare(a.date));
+  });
+  const [editDate,setEditDate]=useState(null);
+  const [editVal,setEditVal]=useState("");
+
+  const saveAll = next => { setLog(next); saveWeights([...loadWeights().filter(w=>!next.find(n=>n.date===w.date)), ...next].sort((a,b)=>a.date.localeCompare(b.date))); };
+
+  const commitEdit = date => {
+    const n=parseFloat(editVal);
+    if(!isNaN(n)&&n>0){
+      const next=log.map(w=>w.date===date?{...w,value:n}:w);
+      saveAll(next);
+    }
+    setEditDate(null);
+  };
+
+  const deleteEntry = date => {
+    const next=log.filter(w=>w.date!==date);
+    setLog(next);
+    saveWeights(loadWeights().filter(w=>w.date!==date));
+  };
+
+  const fmt = dateStr => {
+    const d=new Date(dateStr+"T12:00:00");
+    return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+  };
+
+  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 12px) 16px 20px"}}>
+      <button style={{width:44,height:44,borderRadius:12,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onBack}><IcBack/></button>
+      <span style={{fontSize:16,fontWeight:500,color:C.text}}>Weight History</span>
+      <div style={{width:44}}/>
+    </div>
+    <div style={{padding:"0 16px"}}>
+      <p style={{fontSize:12,fontWeight:300,color:C.dim,marginBottom:16}}>Last 30 days — swipe left to delete</p>
+      {log.length===0&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"48px 0",gap:10}}>
+        <span style={{fontSize:36}}>⚖️</span>
+        <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center"}}>No weight entries yet.</p>
+      </div>}
+      {log.map(w=><WeightRow key={w.date} entry={w} isEditing={editDate===w.date} editVal={editVal} setEditVal={setEditVal} onTapEdit={()=>{setEditDate(w.date);setEditVal(String(w.value));}} onCommit={()=>commitEdit(w.date)} onDelete={()=>deleteEntry(w.date)} fmt={fmt}/>)}
+    </div>
+  </div>;
+}
+
+function WeightRow({entry,isEditing,editVal,setEditVal,onTapEdit,onCommit,onDelete,fmt}) {
+  const [swipeX,setSwipeX]=useState(0);const[swiping,setSwiping]=useState(false);
+  const tx=useRef(0),ty=useRef(0);const THRESHOLD=70;
+  const onTS=e=>{tx.current=e.touches[0].clientX;ty.current=e.touches[0].clientY;setSwiping(false);};
+  const onTM=e=>{const dx=e.touches[0].clientX-tx.current;const dy=Math.abs(e.touches[0].clientY-ty.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<0){setSwiping(true);setSwipeX(Math.max(dx,-(THRESHOLD+20)));}};
+  const onTE=()=>{if(swipeX<=-THRESHOLD)onDelete();else{setSwipeX(0);setSwiping(false);}};
+  return <div style={{position:"relative",marginBottom:8,borderRadius:14,overflow:"hidden"}}>
+    <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:18}}>
+      <span style={{color:"#fff",fontSize:12,fontWeight:400,marginRight:4}}>Delete</span><IcTrash/>
+    </div>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
+      onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
+      <span style={{fontSize:13,fontWeight:300,color:C.sub}}>{fmt(entry.date)}</span>
+      <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+        {isEditing
+          ?<input autoFocus type="number" inputMode="decimal" style={{width:70,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:18,fontWeight:200,fontFamily:"'Inter',sans-serif",textAlign:"right",outline:"none",letterSpacing:"-0.5px"}} value={editVal} onChange={e=>setEditVal(e.target.value)} onBlur={onCommit} onKeyDown={e=>e.key==="Enter"&&onCommit()}/>
+          :<span style={{fontSize:18,fontWeight:200,color:C.text,letterSpacing:"-0.5px",cursor:"pointer"}} onClick={onTapEdit}>{entry.value}</span>
+        }
+        <span style={{fontSize:11,fontWeight:300,color:C.dim}}>lbs</span>
+        {!isEditing&&<span style={{color:C.dim,cursor:"pointer",display:"inline-flex",alignItems:"center"}} onClick={onTapEdit}><IcEdit/></span>}
+      </div>
+    </div>
+  </div>;
+}
+
 function App() {
   const [apiKey,setApiKey]=useState(()=>loadKey());
   const [screen,setScreen]=useState("home");
 
-  // Request mic permission once on first app load so iOS never prompts mid-session
-  useEffect(() => {
-    navigator.mediaDevices?.getUserMedia({ audio: true })
-      .then(s => s.getTracks().forEach(t => t.stop()))
-      .catch(() => {});
-  }, []);
   const [baseGoal,setBaseGoal]=useState(()=>loadBaseGoal());
   const [selected,setSelected]=useState(null);
   const [camImg,setCamImg]=useState({imageData:null,preview:null});
@@ -911,6 +1031,7 @@ function App() {
       onOpenVoice={()=>setScreen("voice")}
       onAddWorkout={addWorkout} onSelectMeal={selectMeal}
       onOpenSettings={()=>setScreen("settings")}
+      onOpenWeightHistory={()=>setScreen("weightHistory")}
       meals={meals} goal={effectiveGoal} baseGoal={baseGoal}
       setBaseGoal={n=>{setBaseGoal(n);saveBaseGoal(n);}}
       date={new Date(dateKey+"T12:00:00")} setDate={changeDate}
@@ -919,6 +1040,7 @@ function App() {
     {screen==="voice"&&<VoiceScreen apiKey={apiKey} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
     {screen==="detail"&&selected&&<DetailScreen meal={selected} onBack={()=>setScreen("home")} onUpdate={updateMeal} onDelete={deleteMeal} apiKey={apiKey}/>}
     {screen==="settings"&&<SettingsScreen apiKey={apiKey} onSave={saveApiKey} onBack={()=>setScreen("home")}/>}
+    {screen==="weightHistory"&&<WeightHistoryScreen onBack={()=>setScreen("home")}/>}
   </div>;
 }
 
