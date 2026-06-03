@@ -758,41 +758,53 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
 
 // Each ingredient stores: name, calories (current total), proteinG (current total),
 // baseCalories (per-serving), baseProteinG (per-serving), servings (float)
-// If baseCalories not set (legacy), treat calories as base with 1 serving.
-function SwipeIngRow({ing,idx,editIdx,servVal,setServVal,setEditIdx,commitServ,onDelete}) {
+function SwipeIngRow({ing,idx,editIdx,editField,servVal,calVal,setServVal,setCalVal,setEditIdx,commitServ,commitCal,onDelete}) {
   const [swipeX,setSwipeX]=useState(0);const[swiping,setSwiping]=useState(false);
   const tx=useRef(0),ty=useRef(0);const THRESHOLD=70;
-  const onTS=e=>{tx.current=e.touches[0].clientX;ty.current=e.touches[0].clientY;setSwiping(false);};
-  const onTM=e=>{const dx=e.touches[0].clientX-tx.current;const dy=Math.abs(e.touches[0].clientY-ty.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<0){setSwiping(true);setSwipeX(Math.max(dx,-(THRESHOLD+20)));}};
-  const onTE=()=>{if(swipeX<=-THRESHOLD)onDelete(idx);else{setSwipeX(0);setSwiping(false);}};
+  const onTS=e=>{tx.current=e.touches[0].clientX;ty.current=e.touches[0].clientY;setSwiping(false);setSwipeX(0);};
+  const onTM=e=>{const dx=e.touches[0].clientX-tx.current;const dy=Math.abs(e.touches[0].clientY-ty.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<-8){setSwiping(true);setSwipeX(Math.max(dx,-(THRESHOLD+20)));}};
+  const onTE=e=>{
+    const dx=Math.abs(e.changedTouches[0].clientX-tx.current);
+    if(dx<8){setSwipeX(0);setSwiping(false);return;} // it was a tap, not a swipe
+    if(swipeX<=-THRESHOLD)onDelete(idx);else{setSwipeX(0);setSwiping(false);}
+  };;
   const servings = ing.servings ?? 1;
-  const isEditing = editIdx===idx;
+  const editingServ = editIdx===idx && editField==="serv";
+  const editingCal  = editIdx===idx && editField==="cal";
   return <div style={{position:"relative",overflow:"hidden",borderTop:`1px solid ${C.border}`}}>
     <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:16}}>
       <span style={{color:"#fff",fontSize:12,fontWeight:400,marginRight:4}}>Delete</span><IcTrash/>
     </div>
     <div style={{padding:"10px 16px",background:C.surface,transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
       onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
-      {/* Name — small, light, top */}
+      {/* Name — small, light */}
       <p style={{fontSize:11,fontWeight:300,color:C.sub,marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ing.name}</p>
-      {/* Servings + Calories row — large, tappable */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        {/* Servings block */}
-        <div style={{display:"flex",alignItems:"baseline",gap:4,cursor:"pointer"}} onClick={()=>{if(!isEditing){setEditIdx(idx);setServVal(String(servings));}}}>
+        {/* Servings — tappable */}
+        <div style={{display:"flex",alignItems:"baseline",gap:4,cursor:"pointer"}}
+          onClick={e=>{e.stopPropagation();if(!editingServ){setEditIdx(idx,"serv");setServVal(String(servings));}}}>
           <span style={{fontSize:10,fontWeight:300,color:C.dim,marginRight:2}}>SRV</span>
-          {isEditing
+          {editingServ
             ?<input autoFocus type="number" inputMode="decimal"
-                style={{width:56,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:22,fontWeight:200,textAlign:"left",outline:"none",fontFamily:"'Inter',sans-serif",letterSpacing:"-0.5px",padding:0}}
+                style={{width:60,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:22,fontWeight:200,textAlign:"left",outline:"none",fontFamily:"'Inter',sans-serif",letterSpacing:"-0.5px",padding:0}}
                 value={servVal} onChange={e=>setServVal(e.target.value)}
                 onBlur={()=>commitServ(idx)} onKeyDown={e=>e.key==="Enter"&&commitServ(idx)}/>
             :<span style={{fontSize:22,fontWeight:200,color:C.text,letterSpacing:"-0.5px"}}>{servings}</span>
           }
-          {!isEditing&&<span style={{color:C.dim,display:"inline-flex",alignItems:"center",marginLeft:2}}><IcEdit size={11}/></span>}
+          {!editingServ&&<span style={{color:C.dim,display:"inline-flex",alignItems:"center",marginLeft:2}}><IcEdit size={11}/></span>}
         </div>
-        {/* Calories block */}
-        <div style={{display:"flex",alignItems:"baseline",gap:4}}>
+        {/* Calories — tappable */}
+        <div style={{display:"flex",alignItems:"baseline",gap:4,cursor:"pointer"}}
+          onClick={e=>{e.stopPropagation();if(!editingCal){setEditIdx(idx,"cal");setCalVal(String(ing.calories));}}}>
           <span style={{fontSize:10,fontWeight:300,color:C.dim,marginRight:2}}>CAL</span>
-          <span style={{fontSize:22,fontWeight:200,color:C.accent,letterSpacing:"-0.5px"}}>{ing.calories}</span>
+          {editingCal
+            ?<input autoFocus type="number" inputMode="numeric"
+                style={{width:70,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:22,fontWeight:200,textAlign:"right",outline:"none",fontFamily:"'Inter',sans-serif",letterSpacing:"-0.5px",padding:0}}
+                value={calVal} onChange={e=>setCalVal(e.target.value)}
+                onBlur={()=>commitCal(idx)} onKeyDown={e=>e.key==="Enter"&&commitCal(idx)}/>
+            :<span style={{fontSize:22,fontWeight:200,color:C.accent,letterSpacing:"-0.5px"}}>{ing.calories}</span>
+          }
+          {!editingCal&&<span style={{color:C.dim,display:"inline-flex",alignItems:"center",marginLeft:2}}><IcEdit size={11}/></span>}
           {(ing.proteinG||0)>0&&<span style={{fontSize:10,fontWeight:300,color:"rgba(96,200,245,0.6)",marginLeft:6}}>{Math.round(ing.proteinG)}g pro</span>}
         </div>
       </div>
@@ -801,7 +813,21 @@ function SwipeIngRow({ing,idx,editIdx,servVal,setServVal,setEditIdx,commitServ,o
 }
 
 function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
-  const normalise = ings => ings.map(ing=>({
+  // Parse servings hints from ingredient names like "1.5 servings of balsamic dressing"
+  const parseServings = ing => {
+    if (ing.servings != null && ing.servings !== 1) return ing; // already set
+    const m = ing.name.match(/^([\d.\/]+)\s*(?:servings?|srv|x)\s+(?:of\s+)?/i);
+    if (m) {
+      const n = parseFloat(m[1]);
+      if (!isNaN(n) && n > 0 && n !== 1) {
+        const baseCal = ing.baseCalories ?? Math.round(ing.calories / n);
+        const baseProt = ing.baseProteinG ?? Math.round(((ing.proteinG||0) / n)*10)/10;
+        return {...ing, servings:n, baseCalories:baseCal, baseProteinG:baseProt};
+      }
+    }
+    return ing;
+  };
+  const normalise = ings => ings.map(ing=>parseServings({
     ...ing,
     baseCalories: ing.baseCalories ?? ing.calories,
     baseProteinG: ing.baseProteinG ?? (ing.proteinG||0),
@@ -811,12 +837,16 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
   const [editTotal,setEditTotal]=useState(false);
   const [totalVal,setTotalVal]=useState(String(meal.totalCalories));
   const [editIdx,setEditIdx]=useState(null);
+  const [editField,setEditField]=useState(null); // "serv" | "cal"
   const [servVal,setServVal]=useState("");
+  const [calVal,setCalVal]=useState("");
   const [addingVoice,setAddingVoice]=useState(false);
   const [addTranscript,setAddTranscript]=useState("");
   const [addError,setAddError]=useState("");
   const [addLoading,setAddLoading]=useState(false);
   const isWorkout=meal.type==="workout";
+
+  const setEditIdx2 = (idx, field) => { setEditIdx(idx); setEditField(field); };
 
   const onUpdate2 = useCallback(t=>setAddTranscript(t),[]);
   const speech = useWebSpeech(onUpdate2);
@@ -843,7 +873,22 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
       setIngs(next);
       save(next);
     }
-    setEditIdx(null);
+    setEditIdx(null); setEditField(null);
+  };
+
+  const commitCal = idx => {
+    const n = parseInt(calVal);
+    if (!isNaN(n) && n >= 0) {
+      const next = ings.map((x,i) => {
+        if (i !== idx) return x;
+        // Update base calories too so future serving changes stay accurate
+        const newBase = x.servings > 0 ? Math.round(n / x.servings) : n;
+        return {...x, calories:n, baseCalories:newBase};
+      });
+      setIngs(next);
+      save(next);
+    }
+    setEditIdx(null); setEditField(null);
   };
 
   const mergeItems = async () => {
@@ -896,7 +941,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
             <IcMic size={12}/> Add item
           </button>}
         </div>
-        {ings.map((ing,idx)=><SwipeIngRow key={idx} ing={ing} idx={idx} editIdx={editIdx} servVal={servVal} setServVal={setServVal} setEditIdx={setEditIdx} commitServ={commitServ} onDelete={i=>{const next=ings.filter((_,j)=>j!==i);setIngs(next);save(next);}}/>)}
+        {ings.map((ing,idx)=><SwipeIngRow key={idx} ing={ing} idx={idx} editIdx={editIdx} editField={editField} servVal={servVal} calVal={calVal} setServVal={setServVal} setCalVal={setCalVal} setEditIdx={setEditIdx2} commitServ={commitServ} commitCal={commitCal} onDelete={i=>{const next=ings.filter((_,j)=>j!==i);setIngs(next);save(next);}}/>)}
 
         {addingVoice&&<div style={{padding:"12px 14px",borderTop:`1px solid ${C.border}`}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
