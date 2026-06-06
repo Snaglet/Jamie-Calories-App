@@ -186,17 +186,7 @@ function Spinner({text}) {
   </div>;
 }
 
-// Pre-request mic permission at script load so iOS never prompts mid-session.
-// This runs once immediately when the page loads, caches the grant for the session.
-(function(){
-  if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
-    navigator.mediaDevices.getUserMedia({audio:true})
-      .then(s=>{s.getTracks().forEach(t=>t.stop());})
-      .catch(()=>{});
-  }
-})();
-
-// ─── FIX 3: VoiceVisualizer no longer calls getUserMedia itself ───────────────
+// ─── VoiceVisualizer ─────────────────────────────────────────────────────────
 // Accepts mediaStream prop from parent. If no stream given, renders animated
 // placeholder bars — zero extra permission prompts.
 function VoiceVisualizer({active, mediaStream}) {
