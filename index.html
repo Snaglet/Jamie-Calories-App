@@ -26,10 +26,40 @@ button{font-family:'Inter',sans-serif;cursor:pointer}
 </style>
 </head>
 <body>
-<div id="root"></div>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<div id="root">
+  <div id="boot-fallback" style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0A0A0F;color:#F0F0F8;font-family:sans-serif;padding:24px;text-align:center;gap:12px;">
+    <div style="width:36px;height:36px;border:3px solid rgba(255,255,255,0.1);border-top:3px solid #4AE68A;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+    <p style="font-size:14px;opacity:0.7;">Loading Just Calories…</p>
+  </div>
+</div>
+<script>
+  // If React hasn't mounted within 8 seconds, something failed to load (likely a CDN issue).
+  // Show a visible error instead of a silent blank screen.
+  window.__bootTimeout = setTimeout(function(){
+    var el = document.getElementById('boot-fallback');
+    if (el) {
+      el.innerHTML = '<p style="font-size:32px;margin-bottom:8px;">⚠️</p>' +
+        '<p style="font-size:15px;font-weight:600;margin-bottom:8px;">Couldn\'t load the app</p>' +
+        '<p style="font-size:13px;opacity:0.6;max-width:280px;line-height:1.5;">This usually means a script failed to load. Check your internet connection and try refreshing. If it keeps happening, tell Jamie.</p>' +
+        '<button onclick="location.reload()" style="margin-top:16px;background:#4AE68A;border:none;border-radius:10px;color:#0A0A0F;font-size:14px;font-weight:600;padding:12px 24px;">Reload</button>';
+    }
+  }, 8000);
+</script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" onerror="window.__scriptFailed=true"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" onerror="window.__scriptFailed=true"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" onerror="window.__scriptFailed=true"></script>
+<script>
+  if (window.__scriptFailed) {
+    clearTimeout(window.__bootTimeout);
+    var el = document.getElementById('boot-fallback');
+    if (el) {
+      el.innerHTML = '<p style="font-size:32px;margin-bottom:8px;">⚠️</p>' +
+        '<p style="font-size:15px;font-weight:600;margin-bottom:8px;">Couldn\'t load required files</p>' +
+        '<p style="font-size:13px;opacity:0.6;max-width:280px;line-height:1.5;">A required script failed to load from the network. Check your internet connection and try refreshing.</p>' +
+        '<button onclick="location.reload()" style="margin-top:16px;background:#4AE68A;border:none;border-radius:10px;color:#0A0A0F;font-size:14px;font-weight:600;padding:12px 24px;">Reload</button>';
+    }
+  }
+</script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
@@ -368,7 +398,7 @@ function WorkoutModal({onAdd,onClose}) {
   </div>;
 }
 
-function SettingsScreen({apiKey,onSave,onBack}) {
+function SettingsScreen({apiKey,onSave,onClear,onBack}) {
   const [val,setVal]=useState("");
   const [saved,setSaved]=useState(false);
   const [err,setErr]=useState("");
@@ -390,10 +420,13 @@ function SettingsScreen({apiKey,onSave,onBack}) {
         <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>OpenAI API Key</p>
         {masked
           ?<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,padding:"10px 12px",background:C.aDim,borderRadius:10,border:`1px solid ${C.aMid}`}}>
-            <span style={{fontSize:11,color:C.accent,fontWeight:600}}>✓ Key saved:</span>
-            <span style={{fontSize:11,color:C.sub,fontFamily:"monospace"}}>{masked}</span>
+            <div style={{flex:1}}>
+              <span style={{fontSize:11,color:C.accent,fontWeight:600}}>✓ Key saved: </span>
+              <span style={{fontSize:11,color:C.sub,fontFamily:"monospace"}}>{masked}</span>
+            </div>
+            <button style={{background:C.rDim,border:`1px solid ${C.rMid}`,borderRadius:8,color:C.red,fontSize:11,fontWeight:500,padding:"4px 10px",flexShrink:0}} onClick={()=>{onClear();setVal("");setErr("");setSaved(false);}}>Clear</button>
           </div>
-          :<p style={{fontSize:12,color:C.red,marginBottom:12,fontWeight:600}}>⚠ No key set — meals cannot be analyzed</p>
+          :<p style={{fontSize:12,color:C.red,marginBottom:12,fontWeight:500}}>⚠ No key set — meals cannot be analyzed</p>
         }
         <p style={{fontSize:12,color:C.sub,lineHeight:1.6,marginBottom:12}}>Get a key at <span style={{color:C.accent}}>platform.openai.com/api-keys</span>. Stored only on this device.</p>
         <input type="password" placeholder={masked?"Enter new key to replace…":"sk-..."} value={val}
@@ -1063,6 +1096,7 @@ function App() {
   const addWorkout=w=>{const k=dateKeyRef.current;saveMeals(k,[...loadMeals(k),w]);bump();};
   const updateMeal=m=>{recordFoodItems(m.ingredients);const k=dateKeyRef.current;saveMeals(k,loadMeals(k).map(x=>x.id===m.id?m:x));setSelected(m);bump();};
   const deleteMeal=id=>{const k=dateKeyRef.current;saveMeals(k,loadMeals(k).filter(x=>x.id!==id));setScreen("home");bump();};
+  const clearApiKey=()=>{saveKey("");setApiKey("");};
   const saveApiKey=k=>{saveKey(k);setApiKey(k);};
   const selectMeal=m=>{
     if(m._quickEdit){const k=dateKeyRef.current;saveMeals(k,loadMeals(k).map(x=>x.id===m.id?{...x,totalCalories:m._newCal}:x));bump();return;}
@@ -1086,12 +1120,23 @@ function App() {
     {screen==="camera"&&<PhotoScreen apiKey={apiKey} imageData={camImg.imageData} imagePreview={camImg.preview} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
     {screen==="voice"&&<VoiceScreen apiKey={apiKey} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
     {screen==="detail"&&selected&&<DetailScreen meal={selected} onBack={()=>setScreen("home")} onUpdate={updateMeal} onDelete={deleteMeal} apiKey={apiKey}/>}
-    {screen==="settings"&&<SettingsScreen apiKey={apiKey} onSave={saveApiKey} onBack={()=>setScreen("home")}/>}
+    {screen==="settings"&&<SettingsScreen apiKey={apiKey} onSave={saveApiKey} onClear={clearApiKey} onBack={()=>setScreen("home")}/>}
     {screen==="weightHistory"&&<WeightHistoryScreen onBack={()=>setScreen("home")}/>}
   </div>;
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+if (window.__bootTimeout) clearTimeout(window.__bootTimeout);
+try {
+  ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+} catch(e) {
+  document.getElementById("root").innerHTML =
+    '<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0A0A0F;color:#F0F0F8;font-family:sans-serif;padding:24px;text-align:center;gap:8px;">' +
+    '<p style="font-size:32px;">⚠️</p>' +
+    '<p style="font-size:15px;font-weight:600;">Something went wrong</p>' +
+    '<p style="font-size:12px;opacity:0.6;max-width:280px;">' + (e.message||"Unknown error") + '</p>' +
+    '<button onclick="location.reload()" style="margin-top:16px;background:#4AE68A;border:none;border-radius:10px;color:#0A0A0F;font-size:14px;font-weight:600;padding:12px 24px;">Reload</button>' +
+    '</div>';
+}
 </script>
 </body>
 </html>
