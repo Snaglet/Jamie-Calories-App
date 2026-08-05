@@ -277,18 +277,21 @@ HOMEMADE / PLATED FOOD:
 - Estimate the ACTUAL portion size visible in the photo. Look for visual cues: plate size, utensils, food density.
 - Never default to a "standard serving" — judge what's actually in the image.
 
-QUANTITIES:
-- If user says "two", "3x", "a dozen" etc, multiply all values by that number.
+QUANTITIES — IMPORTANT:
+- Put the count in the "servings" field, never in the item name. Two crunchy tacos = {"name":"Taco Bell Crunchy Taco","servings":2,...}, NOT {"name":"Crunchy Taco x2","servings":1,...}.
+- calories, proteinG, carbsG and fatG on each ingredient are the values for ONE serving, not the combined total.
+- If the user says "two", "3x", "a dozen" etc, set servings to that number and keep the per-unit values unchanged.
+- Use servings 1 with a descriptive name for a single portion of something ("large bowl of chili").
 
 ACCURACY RULES:
 - Never return 0 calories for any real food item.
-- totalCalories MUST equal the sum of all ingredient calories.
+- totalCalories MUST equal the sum of (calories × servings) across all ingredients.
 - Estimate proteinG, carbsG and fatG for EVERY ingredient, and the totals.
 - Macros should be roughly consistent with calories (protein 4 cal/g, carbs 4 cal/g, fat 9 cal/g).
 - For emoji: pick ONE emoji that best represents the main food item.
 - Return ONLY raw JSON. No markdown fences, no explanation text, nothing else.`;
 
-  const shape = `{"mealTitle":"...","totalCalories":0,"totalProteinG":0,"totalCarbsG":0,"totalFatG":0,"emoji":"🍔","ingredients":[{"name":"...","calories":0,"proteinG":0,"carbsG":0,"fatG":0}],"summary":"..."}`;
+  const shape = `{"mealTitle":"...","totalCalories":0,"totalProteinG":0,"totalCarbsG":0,"totalFatG":0,"emoji":"🍔","ingredients":[{"name":"...","servings":1,"calories":0,"proteinG":0,"carbsG":0,"fatG":0}],"summary":"..."}`;
 
   const userPrompt = imageData
     ? `Analyze this image carefully.${description ? ` User added: "${description}".` : ""} If you see a barcode or package, identify the exact product and use its real nutrition facts. Return this exact JSON: ${shape}`
@@ -515,6 +518,25 @@ function ListeningBars({active}) {
   </div>;
 }
 
+/* Roll up the last n days of logged food into per-day macro totals.
+   Workouts are excluded — they subtract calories, not add macros. */
+function collectDays(n=30) {
+  const out=[];
+  for (let i=n-1;i>=0;i--) {
+    const d=new Date(); d.setDate(d.getDate()-i);
+    const key=fmtKey(d);
+    const food=loadMeals(key).filter(m=>m.type!=="workout");
+    out.push({
+      date:key,
+      calories: food.reduce((s,m)=>s+(m.totalCalories||0),0),
+      protein:  Math.round(food.reduce((s,m)=>s+(m.totalProteinG||0),0)),
+      carbs:    Math.round(food.reduce((s,m)=>s+(m.totalCarbsG||0),0)),
+      fat:      Math.round(food.reduce((s,m)=>s+(m.totalFatG||0),0))
+    });
+  }
+  return out;
+}
+
 function StickyHeader({left, title, right}) {
   return <div style={{
     position:"sticky", top:0, zIndex:30,
@@ -543,28 +565,28 @@ function Spinner({text}) {
   </div>;
 }
 
-/* Thin macro bar: eaten vs target, with the overflow portion shown in orange. */
-function MacroBar({label,value,target,color,onEditTarget}) {
+/* Compact macro column — three of these fit on one row, saving ~70px of
+   vertical space versus stacked full-width bars. */
+function MacroMini({label,value,target,color,onOpen}) {
   const pct = target>0 ? Math.min(value/target,1) : 0;
   const over = target>0 && value>target;
-  const pctLabel = target>0 ? Math.round((value/target)*100) : 0;
-  return <div style={{display:"flex",flexDirection:"column",gap:5}}>
-    <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between"}}>
-      <span style={{fontSize:10,fontWeight:400,color:C.sub,textTransform:"uppercase",letterSpacing:"0.8px"}}>{label}</span>
-      <div style={{display:"flex",alignItems:"baseline",gap:4,cursor:"pointer"}} onClick={onEditTarget}>
-        <span style={{fontSize:14,fontWeight:300,color:C.text,letterSpacing:"-0.3px"}}>{Math.round(value)}</span>
-        <span style={{fontSize:11,fontWeight:300,color:C.dim}}>/ {target}g</span>
-        <span style={{fontSize:10,fontWeight:300,color:over?C.orange:C.dim,marginLeft:2}}>{pctLabel}%</span>
-      </div>
+  return <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={onOpen}>
+    <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:3}}>
+      <span style={{fontSize:9,fontWeight:400,color:C.sub,textTransform:"uppercase",letterSpacing:"0.7px"}}>{label}</span>
+      <span style={{fontSize:9,fontWeight:300,color:over?C.orange:C.dim}}>{target>0?Math.round((value/target)*100):0}%</span>
     </div>
-    <div style={{height:5,borderRadius:3,background:C.hover,overflow:"hidden"}}>
-      <div style={{width:`${pct*100}%`,height:"100%",background:over?C.orange:color,borderRadius:3,transition:"width 0.35s ease"}}/>
+    <div style={{display:"flex",alignItems:"baseline",gap:2,marginBottom:5}}>
+      <span style={{fontSize:16,fontWeight:300,color:C.text,letterSpacing:"-0.4px"}}>{Math.round(value)}</span>
+      <span style={{fontSize:10,fontWeight:300,color:C.dim}}>/{target}g</span>
+    </div>
+    <div style={{height:4,borderRadius:2,background:C.hover,overflow:"hidden"}}>
+      <div style={{width:`${pct*100}%`,height:"100%",background:over?C.orange:color,borderRadius:2,transition:"width 0.35s ease"}}/>
     </div>
   </div>;
 }
 
 /* Full-width weight chart with min/max labels and a 7-day delta. */
-function WeightChart({data}) {
+function WeightChart({data,height=84}) {
   if (!data.length) return null;
   const pts = data.slice(-30);
   if (pts.length < 2) return <p style={{fontSize:11,fontWeight:300,color:C.dim}}>Log another day to see the trend</p>;
@@ -580,7 +602,7 @@ function WeightChart({data}) {
   const trendDown = last <= pts[0].value;
   const color = trendDown ? C.accent : C.orange;
   return <div style={{width:"100%"}}>
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{width:"100%",height:84,display:"block"}}>
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{width:"100%",height,display:"block"}}>
       <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stopColor={color} stopOpacity="0.28"/><stop offset="100%" stopColor={color} stopOpacity="0"/>
       </linearGradient></defs>
@@ -778,7 +800,7 @@ const ActionBtn = ({onClick,tone,icon,label}) => {
   </button>;
 };
 
-function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onStartBuild,onSelectMeal,onAddWorkout,onOpenSettings,onOpenWeightHistory,onOpenProgress,meals,goal,baseGoal,setBaseGoal,date,setDate}) {
+function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAddWorkout,onOpenSettings,onOpenWeightHistory,onOpenProgress,onOpenMacro,meals,goal,baseGoal,setBaseGoal,date,setDate}) {
   const [editGoal,setEditGoal]=useState(false);
   const [goalVal,setGoalVal]=useState(String(baseGoal));
   const [weightLog,setWeightLog]=useState(()=>loadWeights());
@@ -814,7 +836,7 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onStartBuild,onSe
   const commitWeight=()=>{const n=parseFloat(weightVal);if(!isNaN(n)&&n>0){const entry={date:fmtKey(new Date()),value:n};const next=[...weightLog.filter(w=>w.date!==entry.date),entry].sort((a,b)=>a.date.localeCompare(b.date));setWeightLog(next);saveWeights(next);}setEditWeight(false);};
   const shift=days=>{const d=new Date(date);d.setDate(d.getDate()+days);setDate(d);};
 
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:40}}>
+  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:"calc(env(safe-area-inset-bottom,12px) + 104px)"}}>
     <div style={{padding:"env(safe-area-inset-top,44px) 20px 0",background:`linear-gradient(180deg,${C.surface} 0%,${C.bg} 100%)`}}>
       <div style={{paddingTop:12,display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -830,11 +852,17 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onStartBuild,onSe
         <button style={{width:34,height:34,borderRadius:10,background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>shift(-1)}><IcLeft/></button>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
           <span style={{fontSize:14,fontWeight:400,color:C.text}}>{fmtDisplay(date)}</span>
-          {!isToday(date)&&<button style={{background:C.aDim,border:`1px solid ${C.aMid}`,color:C.accent,borderRadius:20,fontSize:11,fontWeight:600,padding:"2px 10px"}} onClick={()=>setDate(new Date())}>Today</button>}
+          {!isToday(date)&&<button style={{background:C.aDim,border:`1px solid ${C.aMid}`,color:C.accent,borderRadius:20,fontSize:11,fontWeight:500,padding:"3px 12px"}} onClick={()=>setDate(new Date())}>← Back to today</button>}
         </div>
         <button style={{width:34,height:34,borderRadius:10,background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>shift(1)}><IcRight/></button>
       </div>
     </div>
+
+    <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async e=>{
+      const f=e.target.files[0]; e.target.value=""; if(!f) return;
+      const r=await fileToImageData(f);
+      if(r) onOpenCamera(r.imageData, r.preview);
+    }}/>
 
     {/* ── Calories + macros, full width ── */}
     <div style={{padding:"0 16px 12px"}}>
@@ -860,11 +888,11 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onStartBuild,onSe
         <div style={{height:7,borderRadius:4,background:C.hover,overflow:"hidden",marginBottom:6}}>
           <div style={{width:`${calPct*100}%`,height:"100%",background:overCal?C.orange:C.accent,borderRadius:4,transition:"width 0.35s ease"}}/>
         </div>
-        <p style={{fontSize:10,color:C.dim,fontWeight:300,marginBottom:16}}>{editGoal?"enter base goal, then return":burned>0?`${baseGoal} base + ${burned} burned`:"tap the goal to change it"}</p>
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <MacroBar label="Protein" value={protein} target={targets.protein} color={C.protein} onEditTarget={onOpenSettings}/>
-          <MacroBar label="Carbs"   value={carbs}   target={targets.carbs}   color={C.carbs}   onEditTarget={onOpenSettings}/>
-          <MacroBar label="Fat"     value={fat}     target={targets.fat}     color={C.fat}     onEditTarget={onOpenSettings}/>
+        <p style={{fontSize:10,color:C.dim,fontWeight:300,marginBottom:14}}>{editGoal?"enter base goal, then return":burned>0?`${baseGoal} base + ${burned} burned`:"tap the goal to change it"}</p>
+        <div style={{display:"flex",gap:14}}>
+          <MacroMini label="Protein" value={protein} target={targets.protein} color={C.protein} onOpen={()=>onOpenMacro("protein")}/>
+          <MacroMini label="Carbs" value={carbs} target={targets.carbs} color={C.carbs} onOpen={()=>onOpenMacro("carbs")}/>
+          <MacroMini label="Fat" value={fat} target={targets.fat} color={C.fat} onOpen={()=>onOpenMacro("fat")}/>
         </div>
       </div>
     </div>
@@ -890,27 +918,9 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onStartBuild,onSe
           <button style={{display:"flex",alignItems:"center",gap:3,background:"none",border:"none",color:C.dim,fontSize:11,padding:"4px 0"}} onClick={onOpenWeightHistory}>History <IcRight/></button>
         </div>
         {weightLog.length>=2
-          ? <WeightChart data={weightLog}/>
+          ? <WeightChart data={weightLog} height={58}/>
           : <p style={{fontSize:11,fontWeight:300,color:C.dim,paddingTop:4}}>{editWeight?"lbs, then return":"Log two days to see the trend"}</p>}
       </div>
-    </div>
-
-    <div style={{display:"flex",gap:8,padding:"0 16px 10px"}}>
-      <ActionBtn onClick={onOpenDescribe} tone="accent" icon={<IcMic/>} label="Say it"/>
-      <ActionBtn onClick={()=>fileRef.current.click()} icon={<IcCamera/>} label="Photo"/>
-      <ActionBtn onClick={onOpenLibrary} icon={<IcStack/>} label="Recent"/>
-      <ActionBtn onClick={()=>setShowWorkout(true)} tone="orange" icon={<span style={{fontSize:22,lineHeight:"22px"}}>🔥</span>} label="Workout"/>
-    </div>
-    <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async e=>{
-      const f=e.target.files[0]; e.target.value=""; if(!f) return;
-      const r=await fileToImageData(f);
-      if(r) onOpenCamera(r.imageData, r.preview);
-    }}/>
-
-    <div style={{padding:"0 16px 18px"}}>
-      <button style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:7,padding:"12px",background:"transparent",border:`1px dashed ${C.border}`,borderRadius:14,color:C.sub,fontSize:12,fontWeight:400}} onClick={onStartBuild}>
-        <IcPlus size={14}/> Start a blank meal
-      </button>
     </div>
 
     <div style={{padding:"0 16px"}}>
@@ -927,6 +937,19 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onStartBuild,onSe
       }
     </div>
     {showWorkout&&<WorkoutModal onAdd={w=>{onAddWorkout(w);setShowWorkout(false);}} onClose={()=>setShowWorkout(false)}/>}
+
+    {/* Docked action bar — fixed to the viewport so it stays under your thumb
+        no matter how far down the meal list you've scrolled. */}
+    <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:50,
+      padding:"10px 16px calc(env(safe-area-inset-bottom,12px) + 10px)",
+      background:`linear-gradient(180deg, rgba(10,10,15,0) 0%, ${C.bg} 22%)`}}>
+      <div style={{display:"flex",gap:8}}>
+        <ActionBtn onClick={onOpenDescribe} tone="accent" icon={<IcMic/>} label="Say it"/>
+        <ActionBtn onClick={()=>fileRef.current.click()} icon={<IcCamera/>} label="Photo"/>
+        <ActionBtn onClick={onOpenLibrary} icon={<IcStack/>} label="Recent"/>
+        <ActionBtn onClick={()=>setShowWorkout(true)} tone="orange" icon={<span style={{fontSize:22,lineHeight:"22px"}}>🔥</span>} label="Workout"/>
+      </div>
+    </div>
   </div>;
 }
 
@@ -1114,30 +1137,69 @@ function SwipeIngRow({ing,idx,editIdx,editField,servVal,calVal,setServVal,setCal
   </div>;
 }
 
-const parseServings = ing => {
-  if (ing.servings != null && ing.servings !== 1) return ing;
-  const m = ing.name.match(/^([\d.\/]+)\s*(?:servings?|srv|x)\s+(?:of\s+)?/i);
-  if (m) {
-    const n = parseFloat(m[1]);
-    if (!isNaN(n) && n > 0 && n !== 1) {
-      return {...ing, servings:n,
-        baseCalories: ing.baseCalories ?? Math.round(ing.calories/n),
-        baseProteinG: ing.baseProteinG ?? Math.round(((ing.proteinG||0)/n)*10)/10,
-        baseCarbsG:   ing.baseCarbsG   ?? Math.round(((ing.carbsG||0)/n)*10)/10,
-        baseFatG:     ing.baseFatG     ?? Math.round(((ing.fatG||0)/n)*10)/10};
-    }
+const r1 = n => Math.round(n*10)/10;
+
+/* Pull a count out of a name like "Crunchy Taco x2" or "2 servings of rice".
+   Returns the count and the name with the quantity stripped off. */
+function inferServings(name) {
+  const n = name || "";
+  let m = n.match(/^([\d.]+)\s*(?:servings?|srv)\s+(?:of\s+)?/i);
+  if (m) return { n: parseFloat(m[1]), name: n.slice(m[0].length).trim() };
+  m = n.match(/^(\d+(?:\.\d+)?)\s*[x×]\s+/i);
+  if (m) return { n: parseFloat(m[1]), name: n.slice(m[0].length).trim() };
+  m = n.match(/\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/i);
+  if (m) return { n: parseFloat(m[1]), name: n.slice(0, m.index).trim() };
+  return { n: 1, name: n };
+}
+
+/* Two different inputs arrive here and they mean opposite things:
+   - servings supplied by the API: per-unit values, so multiply up to get totals.
+   - a count found only in the name (older meals): the numbers are ALREADY the
+     combined total, so divide down to get the per-unit base.
+   Getting these backwards is what silently doubles or halves a meal. */
+const normalise = ings => (ings||[]).map(raw => {
+  const ing = {...raw, proteinG: raw.proteinG||0, carbsG: raw.carbsG||0, fatG: raw.fatG||0};
+  const given = Number(ing.servings);
+  const info = inferServings(ing.name || "");
+  ing.name = info.name || ing.name;
+
+  if (ing.baseCalories != null) {           // already normalised previously
+    ing.servings = given > 0 ? given : 1;
+    ing.baseProteinG = ing.baseProteinG ?? 0;
+    ing.baseCarbsG   = ing.baseCarbsG   ?? 0;
+    ing.baseFatG     = ing.baseFatG     ?? 0;
+    return ing;
   }
+
+  if (given > 1) {                          // per-unit values + explicit count
+    ing.servings = given;
+    ing.baseCalories = ing.calories || 0;
+    ing.baseProteinG = ing.proteinG;
+    ing.baseCarbsG   = ing.carbsG;
+    ing.baseFatG     = ing.fatG;
+    ing.calories = Math.round(ing.baseCalories * given);
+    ing.proteinG = r1(ing.baseProteinG * given);
+    ing.carbsG   = r1(ing.baseCarbsG   * given);
+    ing.fatG     = r1(ing.baseFatG     * given);
+    return ing;
+  }
+
+  if (info.n > 1) {                         // count only in the name — totals already combined
+    ing.servings = info.n;
+    ing.baseCalories = Math.round((ing.calories||0) / info.n);
+    ing.baseProteinG = r1(ing.proteinG / info.n);
+    ing.baseCarbsG   = r1(ing.carbsG   / info.n);
+    ing.baseFatG     = r1(ing.fatG     / info.n);
+    return ing;
+  }
+
+  ing.servings = 1;
+  ing.baseCalories = ing.calories || 0;
+  ing.baseProteinG = ing.proteinG;
+  ing.baseCarbsG   = ing.carbsG;
+  ing.baseFatG     = ing.fatG;
   return ing;
-};
-const normalise = ings => (ings||[]).map(ing=>parseServings({
-  ...ing,
-  proteinG: ing.proteinG||0, carbsG: ing.carbsG||0, fatG: ing.fatG||0,
-  baseCalories: ing.baseCalories ?? ing.calories,
-  baseProteinG: ing.baseProteinG ?? (ing.proteinG||0),
-  baseCarbsG:   ing.baseCarbsG   ?? (ing.carbsG||0),
-  baseFatG:     ing.baseFatG     ?? (ing.fatG||0),
-  servings: ing.servings ?? 1,
-}));
+});
 
 function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
   const [ings,setIngs]=useState(()=>normalise(meal.ingredients));
@@ -1154,6 +1216,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
   const [addError,setAddError]=useState("");
   const [addLoading,setAddLoading]=useState(false);
   const [busyMsg,setBusyMsg]=useState("");
+  const [lightbox,setLightbox]=useState(false);
   const [recent,setRecent]=useState(()=>loadItems().sort(itemSort).slice(0,8));
   const isWorkout=meal.type==="workout";
   const photoRef=useRef();
@@ -1258,28 +1321,54 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
 
   if (busyMsg) return <Spinner text={busyMsg}/>;
 
+  if (lightbox && meal.imageBase64) return <div
+    style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.94)",zIndex:200,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"20px"}}
+    onClick={()=>setLightbox(false)}>
+    <img src={`data:${meal.imageMime||"image/jpeg"};base64,${meal.imageBase64}`}
+      style={{maxWidth:"100%",maxHeight:"82%",objectFit:"contain",borderRadius:12,display:"block"}} alt=""/>
+    <button style={{marginTop:22,background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:14,fontWeight:400,padding:"12px 28px"}}
+      onClick={()=>setLightbox(false)}>Close</button>
+  </div>;
+
   return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
     <StickyHeader
       left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>}
       title={isWorkout?"Workout":"Meal details"}
       right={<HeaderBtn tone="danger" onClick={()=>onDelete(meal.id)}><IcTrash/></HeaderBtn>}
     />
-    {!isWorkout&&(meal.imageBase64
-      ?<img src={`data:${meal.imageMime||"image/jpeg"};base64,${meal.imageBase64}`} style={{width:"100%",height:250,objectFit:"cover",display:"block"}} alt=""/>
-      :<div style={{width:"100%",height:180,background:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:56}}>{meal.emoji||"🍽️"}</span></div>)}
-    {isWorkout&&<div style={{width:"100%",height:140,background:C.oDim,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:64}}>🔥</span></div>}
+    {isWorkout&&<div style={{width:"100%",height:110,background:C.oDim,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:52}}>🔥</span></div>}
 
-    <div style={{padding:"20px 20px 40px"}}>
-      {editTitle
-        ?<input autoFocus value={titleVal} onChange={e=>setTitleVal(e.target.value)} onBlur={commitTitle} onKeyDown={e=>e.key==="Enter"&&commitTitle()}
-           style={{width:"100%",background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:22,fontWeight:400,fontFamily:"'Inter',sans-serif",letterSpacing:"-0.3px",outline:"none",padding:"0 0 4px",marginBottom:6}}/>
-        :<h2 style={{fontSize:22,fontWeight:400,color:isWorkout?C.orange:C.text,marginBottom:6,letterSpacing:"-0.3px",display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}
-           onClick={()=>{setTitleVal(meal.mealTitle);setEditTitle(true);}}>
-           {meal.mealTitle}<span style={{color:C.dim,display:"inline-flex"}}><IcEdit size={14}/></span>
-         </h2>
-      }
-      {meal.summary&&<p style={{fontSize:13,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:5}}>{meal.summary}</p>}
-      <p style={{fontSize:11,color:C.dim,marginBottom:18}}>{meal.time}</p>
+    <div style={{padding:"18px 20px 40px"}}>
+      {/* Thumbnail sits beside the title instead of eating a third of the screen.
+          Tap it for the full-size view. */}
+      <div style={{display:"flex",gap:14,alignItems:"flex-start",marginBottom:14}}>
+        {!isWorkout&&<div style={{flexShrink:0,position:"relative",cursor:meal.imageBase64?"pointer":"default"}}
+          onClick={()=>{ if(meal.imageBase64) setLightbox(true); }}>
+          {meal.imageBase64
+            ?<>
+              <img src={`data:${meal.imageMime||"image/jpeg"};base64,${meal.imageBase64}`}
+                style={{width:84,height:84,borderRadius:14,objectFit:"cover",display:"block",border:`1px solid ${C.border}`}} alt=""/>
+              <div style={{position:"absolute",bottom:4,right:4,background:"rgba(10,10,15,0.8)",borderRadius:6,padding:"2px 5px"}}>
+                <span style={{fontSize:8,fontWeight:400,color:C.text}}>TAP</span>
+              </div>
+            </>
+            :<div style={{width:84,height:84,borderRadius:14,background:C.surface,border:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <span style={{fontSize:34}}>{meal.emoji||"🍽️"}</span>
+            </div>}
+        </div>}
+        <div style={{flex:1,minWidth:0}}>
+          {editTitle
+            ?<input autoFocus value={titleVal} onChange={e=>setTitleVal(e.target.value)} onBlur={commitTitle} onKeyDown={e=>e.key==="Enter"&&commitTitle()}
+               style={{width:"100%",background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:19,fontWeight:400,fontFamily:"'Inter',sans-serif",letterSpacing:"-0.3px",outline:"none",padding:"0 0 4px",marginBottom:6}}/>
+            :<h2 style={{fontSize:19,fontWeight:400,color:isWorkout?C.orange:C.text,marginBottom:5,letterSpacing:"-0.3px",lineHeight:1.3,cursor:"pointer"}}
+               onClick={()=>{setTitleVal(meal.mealTitle);setEditTitle(true);}}>
+               {meal.mealTitle}<span style={{color:C.dim,display:"inline-flex",marginLeft:7,verticalAlign:"middle"}}><IcEdit size={13}/></span>
+             </h2>
+          }
+          <p style={{fontSize:11,color:C.dim}}>{meal.time}</p>
+        </div>
+      </div>
+      {meal.summary&&<p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:16}}>{meal.summary}</p>}
 
       <div style={{display:"flex",flexDirection:"column",gap:4,padding:"14px 18px",background:isWorkout?C.oDim:C.aDim,border:`1px solid ${isWorkout?C.oMid:C.aMid}`,borderRadius:16,cursor:"pointer",marginBottom:10}} onClick={()=>{setTotalVal(String(meal.totalCalories));setEditTotal(true);}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -1648,6 +1737,84 @@ function ProgressScreen({onBack}) {
   </div>;
 }
 
+/* Per-macro history: 30-day bars against target, plus a day-by-day list. */
+function NutrientHistoryScreen({metric,goal,onBack}) {
+  const META = {
+    protein:{label:"Protein", color:C.protein},
+    carbs:  {label:"Carbs",   color:C.carbs},
+    fat:    {label:"Fat",     color:C.fat}
+  };
+  const meta = META[metric] || META.protein;
+  const target = macroTargets(goal)[metric] || 0;
+  const days = useRef(collectDays(30)).current;
+  const logged = days.filter(d=>d.calories>0);
+  const avg = logged.length ? Math.round(logged.reduce((s,d)=>s+d[metric],0)/logged.length) : 0;
+  const hits = logged.filter(d=>d[metric]>=target).length;
+  const peak = Math.max(target, ...days.map(d=>d[metric]), 1);
+  const targetY = (target/peak)*100;
+
+  const fmtDay = k => new Date(k+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+
+  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
+    <StickyHeader left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>} title={`${meta.label} history`}/>
+    <div style={{padding:"16px 16px 0"}}>
+
+      <div style={{display:"flex",gap:10,marginBottom:16}}>
+        {[["Average",`${avg}g`],["Target",`${target}g`],["Days hit",`${hits}/${logged.length||0}`]].map(([l,v])=>
+          <div key={l} style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"12px 10px",display:"flex",flexDirection:"column",alignItems:"center"}}>
+            <span style={{fontSize:17,fontWeight:200,color:meta.color,letterSpacing:"-0.5px"}}>{v}</span>
+            <span style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:3}}>{l}</span>
+          </div>
+        )}
+      </div>
+
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:"16px 16px 12px",marginBottom:16}}>
+        <p style={{fontSize:10,fontWeight:400,color:C.sub,textTransform:"uppercase",letterSpacing:"1px",marginBottom:14}}>Last 30 days</p>
+        <div style={{position:"relative",height:120,marginBottom:8}}>
+          {target>0&&<div style={{position:"absolute",left:0,right:0,bottom:`${targetY}%`,borderTop:`1px dashed ${C.dim}`,zIndex:1}}>
+            <span style={{position:"absolute",right:0,top:-13,fontSize:9,color:C.dim}}>{target}g</span>
+          </div>}
+          <div style={{display:"flex",alignItems:"flex-end",gap:2,height:"100%"}}>
+            {days.map(d=>{
+              const v=d[metric];
+              const h=Math.max(v>0?3:1,(v/peak)*100);
+              return <div key={d.date} style={{flex:1,minWidth:0,height:`${h}%`,
+                background: v===0 ? C.hover : v>=target ? meta.color : `${meta.color}55`,
+                borderRadius:"2px 2px 0 0"}}/>;
+            })}
+          </div>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between"}}>
+          <span style={{fontSize:9,fontWeight:300,color:C.dim}}>{fmtDay(days[0].date)}</span>
+          <span style={{fontSize:9,fontWeight:300,color:C.dim}}>Today</span>
+        </div>
+      </div>
+
+      <p style={{fontSize:11,fontWeight:300,color:C.dim,marginBottom:10}}>Days with food logged</p>
+      {logged.length===0&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"40px 0",gap:10}}>
+        <span style={{fontSize:34}}>📊</span>
+        <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center"}}>Nothing logged in the last 30 days.</p>
+      </div>}
+      {[...logged].reverse().map(d=>{
+        const v=d[metric];
+        const pct=target>0?Math.round((v/target)*100):0;
+        return <div key={d.date} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:"12px 15px",marginBottom:7}}>
+          <div style={{flex:1,minWidth:0}}>
+            <p style={{fontSize:13,fontWeight:300,color:C.text}}>{fmtDay(d.date)}</p>
+            <div style={{height:4,borderRadius:2,background:C.hover,overflow:"hidden",marginTop:6,maxWidth:150}}>
+              <div style={{width:`${Math.min(pct,100)}%`,height:"100%",background:meta.color,borderRadius:2}}/>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"baseline",gap:5,flexShrink:0,paddingLeft:12}}>
+            <span style={{fontSize:18,fontWeight:200,color:meta.color,letterSpacing:"-0.5px"}}>{v}</span>
+            <span style={{fontSize:10,fontWeight:300,color:C.dim}}>g · {pct}%</span>
+          </div>
+        </div>;
+      })}
+    </div>
+  </div>;
+}
+
 function WeightHistoryScreen({onBack}) {
   const [log,setLog]=useState(()=>{
     const all=loadWeights();
@@ -1709,6 +1876,7 @@ function App() {
   const [baseGoal,setBaseGoal]=useState(()=>loadBaseGoal());
   const [selected,setSelected]=useState(null);
   const [camImg,setCamImg]=useState({imageData:null,preview:null});
+  const [macroMetric,setMacroMetric]=useState("protein");
   const dateKeyRef=useRef(fmtKey(new Date()));
   const [,forceRender]=useState(0);
   const bump=()=>forceRender(n=>n+1);
@@ -1749,12 +1917,6 @@ function App() {
 
   const deleteMeal=id=>{const k=dateKeyRef.current;saveMeals(k,loadMeals(k).filter(x=>x.id!==id));setScreen("home");bump();};
 
-  const startBuild = () => {
-    const k=dateKeyRef.current;
-    const m={id:uid(),mealTitle:"New meal",totalCalories:0,totalProteinG:0,totalCarbsG:0,totalFatG:0,ingredients:[],summary:"",imageBase64:null,emoji:"🍽️",...nowStamp()};
-    saveMeals(k,[...loadMeals(k),m]);
-    setSelected(m); setScreen("detail"); bump();
-  };
 
   const addFromLibrary = tpl => {
     const k=dateKeyRef.current;
@@ -1810,11 +1972,11 @@ function App() {
       onOpenCamera={(imageData,preview)=>{setCamImg({imageData,preview});setScreen("camera");}}
       onOpenDescribe={()=>setScreen("describe")}
       onOpenLibrary={()=>setScreen("library")}
-      onStartBuild={startBuild}
       onAddWorkout={addWorkout} onSelectMeal={selectMeal}
       onOpenSettings={()=>setScreen("settings")}
       onOpenWeightHistory={()=>setScreen("weightHistory")}
       onOpenProgress={()=>setScreen("progress")}
+      onOpenMacro={m=>{setMacroMetric(m);setScreen("macroHistory");}}
       meals={meals} goal={effectiveGoal} baseGoal={baseGoal}
       setBaseGoal={n=>{setBaseGoal(n);saveBaseGoal(n);}}
       date={new Date(dateKey+"T12:00:00")} setDate={changeDate}
@@ -1826,6 +1988,7 @@ function App() {
     {screen==="detail"&&selected&&<DetailScreen meal={selected} onBack={leaveDetail} onUpdate={updateMeal} onDelete={deleteMeal} apiKey={apiKey}/>}
     {screen==="settings"&&<SettingsScreen apiKey={apiKey} onSave={saveApiKey} onClear={clearApiKey} onBack={()=>setScreen("home")} goal={effectiveGoal}/>}
     {screen==="weightHistory"&&<WeightHistoryScreen onBack={()=>setScreen("home")}/>}
+    {screen==="macroHistory"&&<NutrientHistoryScreen metric={macroMetric} goal={effectiveGoal} onBack={()=>setScreen("home")}/>}
   </div>;
 }
 
