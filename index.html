@@ -403,9 +403,10 @@ const uid = () => `m${++_id}`;
 
 const C = {
   bg:"#0A0A0F", surface:"#13131A", hover:"#1C1C28", card:"#16161F",
-  border:"rgba(255,255,255,0.06)",
+  border:"rgba(255,255,255,0.10)",
   accent:"#4AE68A", aDim:"rgba(74,230,138,0.12)", aMid:"rgba(74,230,138,0.35)",
-  text:"#F0F0F8", sub:"rgba(240,240,248,0.5)", dim:"rgba(240,240,248,0.22)",
+  text:"#F0F0F8", sub:"rgba(240,240,248,0.66)", dim:"rgba(240,240,248,0.50)",
+  track:"rgba(240,240,248,0.16)",
   red:"#FF4444", rDim:"rgba(255,68,68,0.14)", rMid:"rgba(255,68,68,0.35)",
   orange:"#FF9500", oDim:"rgba(255,149,0,0.14)", oMid:"rgba(255,149,0,0.35)",
   protein:"#60C8F5", carbs:"#C88CF5", fat:"#F5C860"
@@ -579,7 +580,7 @@ function MacroMini({label,value,target,color,onOpen}) {
       <span style={{fontSize:16,fontWeight:300,color:C.text,letterSpacing:"-0.4px"}}>{Math.round(value)}</span>
       <span style={{fontSize:10,fontWeight:300,color:C.dim}}>/{target}g</span>
     </div>
-    <div style={{height:4,borderRadius:2,background:C.hover,overflow:"hidden"}}>
+    <div style={{height:4,borderRadius:2,background:C.track,overflow:"hidden"}}>
       <div style={{width:`${pct*100}%`,height:"100%",background:over?C.orange:color,borderRadius:2,transition:"width 0.35s ease"}}/>
     </div>
   </div>;
@@ -885,7 +886,7 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
             <p style={{fontSize:9,color:C.dim,fontWeight:300,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:2}}>{overCal?"over":"left"}</p>
           </div>
         </div>
-        <div style={{height:7,borderRadius:4,background:C.hover,overflow:"hidden",marginBottom:6}}>
+        <div style={{height:7,borderRadius:4,background:C.track,overflow:"hidden",marginBottom:6}}>
           <div style={{width:`${calPct*100}%`,height:"100%",background:overCal?C.orange:C.accent,borderRadius:4,transition:"width 0.35s ease"}}/>
         </div>
         <p style={{fontSize:10,color:C.dim,fontWeight:300,marginBottom:14}}>{editGoal?"enter base goal, then return":burned>0?`${baseGoal} base + ${burned} burned`:"tap the goal to change it"}</p>
@@ -1779,7 +1780,7 @@ function NutrientHistoryScreen({metric,goal,onBack}) {
               const v=d[metric];
               const h=Math.max(v>0?3:1,(v/peak)*100);
               return <div key={d.date} style={{flex:1,minWidth:0,height:`${h}%`,
-                background: v===0 ? C.hover : v>=target ? meta.color : `${meta.color}55`,
+                background: v===0 ? C.track : v>=target ? meta.color : `${meta.color}66`,
                 borderRadius:"2px 2px 0 0"}}/>;
             })}
           </div>
@@ -1801,7 +1802,7 @@ function NutrientHistoryScreen({metric,goal,onBack}) {
         return <div key={d.date} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:"12px 15px",marginBottom:7}}>
           <div style={{flex:1,minWidth:0}}>
             <p style={{fontSize:13,fontWeight:300,color:C.text}}>{fmtDay(d.date)}</p>
-            <div style={{height:4,borderRadius:2,background:C.hover,overflow:"hidden",marginTop:6,maxWidth:150}}>
+            <div style={{height:4,borderRadius:2,background:C.track,overflow:"hidden",marginTop:6,maxWidth:150}}>
               <div style={{width:`${Math.min(pct,100)}%`,height:"100%",background:meta.color,borderRadius:2}}/>
             </div>
           </div>
