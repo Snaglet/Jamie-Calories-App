@@ -305,7 +305,7 @@ ACCURACY RULES:
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: "gpt-5.5",
+        model: "gpt-5.6-sol",
         messages: [
           { role: "system", content: sysPrompt },
           { role: "user", content: contentArr }
@@ -784,7 +784,7 @@ function ApiKeyScreen({onSave}) {
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"40px 28px",width:"100%",maxWidth:380}}>
       <span style={{fontSize:52,marginBottom:12}}>⚡</span>
       <h1 style={{fontSize:32,fontWeight:200,color:C.text,textAlign:"center",lineHeight:1.15,letterSpacing:"-1.5px",marginBottom:6}}>Just Calories</h1>
-      <p style={{color:C.accent,fontSize:13,fontWeight:300,marginBottom:32,marginTop:6}}>Powered by GPT-5.5 Vision</p>
+      <p style={{color:C.accent,fontSize:13,fontWeight:300,marginBottom:32,marginTop:6}}>Powered by GPT-5.6 Sol Vision</p>
       <div style={{width:"100%",background:C.surface,borderRadius:20,padding:"24px 20px",border:`1px solid ${C.border}`}}>
         <p style={{color:C.sub,fontSize:13,lineHeight:1.7,textAlign:"center",marginBottom:4}}>Enter your OpenAI API key to get started.</p>
         <p style={{color:C.dim,fontSize:12,lineHeight:1.6,textAlign:"center",marginBottom:16}}>Get one at <span style={{color:C.accent}}>platform.openai.com/api-keys</span></p>
@@ -1044,7 +1044,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
       setSubmitting(false);
     }
   };
-  if (submitting && !error) return <Spinner text={retryNote||"Analyzing with GPT-5.5…"}/>;
+  if (submitting && !error) return <Spinner text={retryNote||"Analyzing with GPT-5.6 Sol…"}/>;
   return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column"}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 8px) 16px 8px",flexShrink:0}}>
       <button style={{width:40,height:40,borderRadius:11,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{speech.stop();onBack();}}><IcBack/></button>
