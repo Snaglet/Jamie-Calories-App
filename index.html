@@ -259,7 +259,12 @@ async function saveMealsWithFallback(dateKey, meals, rawImage) {
   const stripped = meals.map((m,i) => i===meals.length-1 ? {...m, imageBase64:null} : m);
   return saveMeals(dateKey, stripped);
 }
-async function analyze(apiKey, imageData, description) {
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+/* One attempt at the vision call. Marks e.retryable on failures that are
+   plausibly transient (network hiccup, rate limit, server-side 5xx, or a
+   response that got cut off before the JSON closed) so the caller can
+   retry automatically instead of dumping the user straight to an error. */
+async function analyzeAttempt(apiKey, imageData, description) {
   if (!apiKey) throw new Error("No API key — tap ⚙️ Settings to add your OpenAI key");
   const sysPrompt = `You are an expert nutritionist and food label reader with access to USDA databases, restaurant nutrition facts, and packaged food data.
 BARCODE & PACKAGING:
@@ -294,25 +299,40 @@ ACCURACY RULES:
     });
   }
   contentArr.push({ type: "text", text: userPrompt });
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "gpt-5.5",
-      messages: [
-        { role: "system", content: sysPrompt },
-        { role: "user", content: contentArr }
-      ],
-      max_completion_tokens: 900
-    })
-  });
+  let res;
+  try {
+    res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: "gpt-5.5",
+        messages: [
+          { role: "system", content: sysPrompt },
+          { role: "user", content: contentArr }
+        ],
+        // Meals with lots of ingredients (a big plate, a multi-item order) need
+        // real headroom — 900 was tight enough that the reply sometimes got cut
+        // off mid-JSON, which showed up to the user as a flat "failed, retry".
+        max_completion_tokens: 2000
+      })
+    });
+  } catch (networkErr) {
+    const err = new Error("Network error — check your connection and try again");
+    err.retryable = true;
+    throw err;
+  }
   if (!res.ok) {
     let msg = `API error ${res.status}`;
     try { const e = await res.json(); msg = e.error?.message || msg; } catch {}
-    if (res.status === 401) throw new Error("Invalid API key — tap ⚙️ to update it");
-    if (res.status === 400) throw new Error(`Bad request: ${msg}`);
-    if (res.status === 429) throw new Error("Rate limit — wait a moment and try again");
-    throw new Error(msg);
+    let err;
+    if (res.status === 401) err = new Error("Invalid API key — tap ⚙️ to update it");
+    else if (res.status === 400) err = new Error(`Bad request: ${msg}`);
+    else if (res.status === 429) err = new Error("Rate limit — wait a moment and try again");
+    else err = new Error(msg);
+    // 401/400 won't fix themselves on retry; overload (429) and server-side
+    // errors (5xx) usually will.
+    err.retryable = res.status === 429 || res.status >= 500;
+    throw err;
   }
   const data = await res.json();
   const rawText = data.choices?.[0]?.message?.content || "";
@@ -320,9 +340,31 @@ ACCURACY RULES:
   try { return JSON.parse(cleaned); }
   catch {
     const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error("Unexpected response — please try again");
+    if (match) {
+      try { return JSON.parse(match[0]); } catch {}
+    }
+    const err = new Error("Unexpected response — please try again");
+    err.retryable = true;
+    throw err;
   }
+}
+/* Public entry point: retries transient failures automatically (up to 3
+   attempts total, short backoff between) before ever surfacing an error to
+   the user. onRetry(attemptNumber) lets the caller update its loading text. */
+async function analyze(apiKey, imageData, description, onRetry) {
+  const MAX_ATTEMPTS = 3;
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await analyzeAttempt(apiKey, imageData, description);
+    } catch (e) {
+      lastErr = e;
+      if (!e.retryable || attempt === MAX_ATTEMPTS) throw e;
+      onRetry?.(attempt, MAX_ATTEMPTS);
+      await sleep(500 * attempt);
+    }
+  }
+  throw lastErr;
 }
 /* ─── Recent ingredients ────────────────────────────────────────────────────
    Ordered by how often an item has been picked, then by how recently. New
@@ -917,6 +959,7 @@ function DescribeScreen({apiKey,onBack,onAdd}) {
   const [text,setText]=useState("");
   const [error,setError]=useState("");
   const [submitting,setSubmitting]=useState(false);
+  const [retryNote,setRetryNote]=useState("");
   const baseRef=useRef("");
   const onUpdate=useCallback(t=>setText(baseRef.current+t),[]);
   const speech=useWebSpeech(onUpdate);
@@ -928,9 +971,9 @@ function DescribeScreen({apiKey,onBack,onAdd}) {
   const submit = async () => {
     if (!text.trim()) return;
     speech.stop();
-    setSubmitting(true);
+    setSubmitting(true); setRetryNote("");
     try {
-      const r = await analyze(apiKey, null, text);
+      const r = await analyze(apiKey, null, text, (n,max)=>setRetryNote(`Hit a snag — retrying (${n}/${max-1})…`));
       const now = new Date();
       onAdd({
         id:uid(), mealTitle:r.mealTitle, totalCalories:r.totalCalories,
@@ -941,7 +984,7 @@ function DescribeScreen({apiKey,onBack,onAdd}) {
       });
     } catch(e) { setError(e.message||"Something went wrong — check Settings ⚙️"); setSubmitting(false); }
   };
-  if (submitting) return <Spinner text="Building your meal…"/>;
+  if (submitting) return <Spinner text={retryNote||"Building your meal…"}/>;
   return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:40}}>
     <StickyHeader left={<HeaderBtn onClick={()=>{speech.stop();onBack();}}><IcBack/></HeaderBtn>} title="Say what you ate"/>
     <div style={{display:"flex",flexDirection:"column",gap:14,padding:"12px 20px 40px"}}>
@@ -972,6 +1015,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
   const [note,setNote]=useState("");
   const [error,setError]=useState("");
   const [submitting,setSubmitting]=useState(false);
+  const [retryNote,setRetryNote]=useState("");
   const baseRef=useRef("");
   const onUpdate=useCallback(t=>setNote(baseRef.current+t),[]);
   const speech=useWebSpeech(onUpdate);
@@ -980,9 +1024,12 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
   const submit = async () => {
     speech.stop();
     setError("");
-    setSubmitting(true);
+    setSubmitting(true); setRetryNote("");
     try {
-      const r = await analyze(apiKey, imageData, note || undefined);
+      // analyze() already retries transient failures (rate limits, dropped
+      // connections, a response that got cut off) up to 3 times on its own —
+      // this screen only shows an error after all of those attempts are spent.
+      const r = await analyze(apiKey, imageData, note || undefined, (n,max)=>setRetryNote(`Hit a snag — retrying (${n}/${max-1})…`));
       const now = new Date();
       onAdd({
         id:uid(), mealTitle:r.mealTitle, totalCalories:r.totalCalories,
@@ -997,7 +1044,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
       setSubmitting(false);
     }
   };
-  if (submitting && !error) return <Spinner text="Analyzing with GPT-5.5…"/>;
+  if (submitting && !error) return <Spinner text={retryNote||"Analyzing with GPT-5.5…"}/>;
   return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column"}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 8px) 16px 8px",flexShrink:0}}>
       <button style={{width:40,height:40,borderRadius:11,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{speech.stop();onBack();}}><IcBack/></button>
@@ -1223,7 +1270,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     speech.stop();
     setAddLoading(true); setAddError("");
     try {
-      const r = await analyze(apiKey, null, addText);
+      const r = await analyze(apiKey, null, addText, (n,max)=>setAddLoading(`Retrying (${n}/${max-1})…`));
       const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0}];
       const extra = {};
       if (!meal.emoji || meal.mealTitle === "New meal") extra.emoji = r.emoji || meal.emoji;
@@ -1237,7 +1284,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     try {
       const shot = await fileToImageData(file);
       if (!shot) { setBusyMsg(""); setAddError("Couldn't read that photo"); return; }
-      const r = await analyze(apiKey, shot.imageData, null);
+      const r = await analyze(apiKey, shot.imageData, null, (n,max)=>setBusyMsg(`Hit a snag — retrying (${n}/${max-1})…`));
       const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0}];
       const extra = {};
       if (!meal.imageBase64) {
@@ -1352,7 +1399,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
           <div style={{display:"flex",gap:8}}>
             <button style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,borderRadius:10,color:C.sub,fontSize:13,fontWeight:500,padding:"10px"}} onClick={()=>{speech.stop();setAdding(false);setAddText("");setAddError("");}}>Cancel</button>
             <button style={{flex:2,background:addLoading?"transparent":C.accent,border:addLoading?`1px solid ${C.aMid}`:"none",borderRadius:10,color:addLoading?C.accent:C.bg,fontSize:13,fontWeight:500,padding:"10px",opacity:addText.trim()?1:0.35}} onClick={addByText} disabled={!addText.trim()||addLoading}>
-              {addLoading?"Calculating…":"Add item →"}
+              {addLoading ? (typeof addLoading==="string" ? addLoading : "Calculating…") : "Add item →"}
             </button>
           </div>
         </div>}
