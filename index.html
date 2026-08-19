@@ -1296,6 +1296,20 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     } catch(e) { setAddError(e.message||"Couldn't analyze that photo"); }
     setBusyMsg("");
   };
+  // Edits normally commit on blur, but iOS standalone (Add to Home Screen)
+  // mode has a known quirk where a tap on another button can register before
+  // the focused input's blur finishes — so leaving the screen can race an
+  // in-progress edit and drop it. Flushing here, synchronously, before we
+  // ever navigate away, makes that impossible: whatever's being typed always
+  // lands in localStorage before Back/Delete run.
+  const commitPendingEdit = () => {
+    if (editTotal) { commitTotal(); return; }
+    if (editTitle) { commitTitle(); return; }
+    if (editIdx !== null) {
+      if (editField === "serv") commitServ(editIdx);
+      else if (editField === "cal") commitCal(editIdx);
+    }
+  };
   if (busyMsg) return <Spinner text={busyMsg}/>;
   if (lightbox && meal.imageBase64) return <div
     style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.94)",zIndex:200,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"20px"}}
@@ -1307,9 +1321,9 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
   </div>;
   return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
     <StickyHeader
-      left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>}
+      left={<HeaderBtn onClick={()=>{commitPendingEdit();onBack();}}><IcBack/></HeaderBtn>}
       title={isWorkout?"Workout":"Meal details"}
-      right={<HeaderBtn tone="danger" onClick={()=>onDelete(meal.id)}><IcTrash/></HeaderBtn>}
+      right={<HeaderBtn tone="danger" onClick={()=>{commitPendingEdit();onDelete(meal.id);}}><IcTrash/></HeaderBtn>}
     />
     {isWorkout&&<div style={{width:"100%",height:110,background:C.oDim,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:52}}>🔥</span></div>}
     <div style={{padding:"18px 20px 40px"}}>
