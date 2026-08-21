@@ -97,7 +97,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // Bumped on every delivered build so a stale cached copy (very common with
 // "Add to Home Screen" / re-opened local files) is instantly identifiable —
 // visible in Settings and as a small footer on the home screen.
-const APP_BUILD = "2026.08.21-before-flash-1";
+const APP_BUILD = "2026.08.21-before-flash-2";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -479,6 +479,11 @@ const IcGear = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
    app launch; that's an OS rule with no workaround.
    ───────────────────────────────────────────────────────────────────────────*/
 let _rec = null;
+// Tracks whether the shared recognizer is actually capturing audio right now,
+// independent of any one component's own state — lets a "pre-warm" call made
+// before a screen even mounts (see prewarmSpeech below) be recognized as
+// already-active once that screen's own useWebSpeech instance attaches.
+let _recRunning = false;
 function getRecognizer() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null;
@@ -490,6 +495,22 @@ function getRecognizer() {
   }
   return _rec;
 }
+/* Starts the mic the instant a gesture happens (e.g. a button tap), before
+   the screen that actually wants the transcript has even mounted. Browsers
+   only grant mic permission within a fresh user gesture — waiting until
+   after an on-screen delay (like the before-photo flash) risks the prompt
+   being silently blocked. The screen that mounts afterward "adopts" this
+   already-running session via useWebSpeech's start(), see below. */
+function prewarmSpeech() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR || _recRunning) return;
+  const rec = getRecognizer();
+  if (!rec) return;
+  rec.onstart = () => { _recRunning = true; };
+  rec.onerror = () => { _recRunning = false; };
+  rec.onend   = () => { _recRunning = false; };
+  try { rec.start(); } catch { /* already running */ }
+}
 function useWebSpeech(onUpdate) {
   const [listening, setListening] = useState(false);
   const supported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -498,6 +519,7 @@ function useWebSpeech(onUpdate) {
     if (!supported || activeRef.current) return;
     const rec = getRecognizer();
     if (!rec) return;
+    const alreadyRunning = _recRunning;
     let final = "";
     rec.onresult = e => {
       let interim = "";
@@ -510,10 +532,17 @@ function useWebSpeech(onUpdate) {
     };
     // onstart fires only once the OS actually hands over audio, so the UI never
     // shows "listening" while the permission dialog is still up.
-    rec.onstart = () => { activeRef.current = true; setListening(true); };
-    rec.onerror = () => { activeRef.current = false; setListening(false); };
-    rec.onend   = () => { activeRef.current = false; setListening(false); };
-    try { rec.start(); } catch { /* already running */ }
+    rec.onstart = () => { _recRunning = true; activeRef.current = true; setListening(true); };
+    rec.onerror = () => { _recRunning = false; activeRef.current = false; setListening(false); };
+    rec.onend   = () => { _recRunning = false; activeRef.current = false; setListening(false); };
+    if (alreadyRunning) {
+      // A prewarm call already got onstart to fire before we attached these
+      // handlers — reflect "listening" immediately instead of waiting for an
+      // event that already happened.
+      activeRef.current = true; setListening(true);
+    } else {
+      try { rec.start(); } catch { /* already running */ }
+    }
   }, [supported, onUpdate]);
   const stop = useCallback(() => {
     try { _rec?.stop(); } catch {}
@@ -701,8 +730,8 @@ function BeforeFlash({base64,onDone}) {
   const [visible,setVisible]=useState(false);
   useEffect(()=>{
     const raf=requestAnimationFrame(()=>setVisible(true));
-    const hide=setTimeout(()=>setVisible(false),820);
-    const done=setTimeout(()=>onDone(),1000);
+    const hide=setTimeout(()=>setVisible(false),1800);
+    const done=setTimeout(()=>onDone(),2000);
     return ()=>{ cancelAnimationFrame(raf); clearTimeout(hide); clearTimeout(done); };
   },[]);
   return <div style={{position:"fixed",inset:0,zIndex:210,background:"rgba(10,10,15,0.9)",display:"flex",alignItems:"center",justifyContent:"center",opacity:visible?1:0,transition:"opacity 0.15s ease",pointerEvents:"none"}}>
@@ -878,11 +907,17 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
   useEffect(()=>{
     if (photoChecked && !beforePhoto && !hasSeenPhotoPrompt()) setShowPhotoPrompt(true);
   }, [photoChecked, beforePhoto]);
-  // Flash the pinned "before" photo for a beat before Say It / Photo actually
-  // opens. Skipped silently (fn runs immediately) if no photo is pinned yet.
-  const triggerAction = fn => {
-    if (beforePhoto?.base64) { pendingActionRef.current = fn; setFlashPhoto(beforePhoto.base64); }
-    else fn();
+  // Flash the pinned "before" photo for a couple seconds, then run fn (the
+  // actual next step). `immediate`, if given, runs synchronously right now —
+  // in the same tap — because the camera picker and the mic both require a
+  // fresh user gesture; firing them only after the flash's delay risks the
+  // browser silently blocking them, which is what was landing back on the
+  // home screen instead of opening the next step. Skipped straight to fn()
+  // if no before photo is pinned yet.
+  const triggerAction = (fn, immediate) => {
+    immediate?.();
+    if (beforePhoto?.base64) { pendingActionRef.current = fn || null; setFlashPhoto(beforePhoto.base64); }
+    else fn?.();
   };
   const food = meals.filter(m=>m.type!=="workout");
   const eaten = food.reduce((s,m)=>s+m.totalCalories,0);
@@ -1023,8 +1058,8 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
       padding:"10px 16px calc(env(safe-area-inset-bottom,12px) + 10px)",
       background:`linear-gradient(180deg, rgba(10,10,15,0) 0%, ${C.bg} 22%)`}}>
       <div style={{display:"flex",gap:8}}>
-        <ActionBtn onClick={()=>triggerAction(onOpenDescribe)} tone="accent" icon={<IcMic/>} label="Say it"/>
-        <ActionBtn onClick={()=>triggerAction(()=>fileRef.current.click())} icon={<IcCamera/>} label="Photo"/>
+        <ActionBtn onClick={()=>triggerAction(onOpenDescribe, prewarmSpeech)} tone="accent" icon={<IcMic/>} label="Say it"/>
+        <ActionBtn onClick={()=>triggerAction(null, ()=>fileRef.current.click())} icon={<IcCamera/>} label="Photo"/>
         <ActionBtn onClick={onOpenLibrary} icon={<IcStack/>} label="Recent"/>
         <ActionBtn onClick={()=>setShowWorkout(true)} tone="orange" icon={<span style={{fontSize:22,lineHeight:"22px"}}>🔥</span>} label="Workout"/>
       </div>
