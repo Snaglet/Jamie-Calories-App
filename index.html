@@ -97,7 +97,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // Bumped on every delivered build so a stale cached copy (very common with
 // "Add to Home Screen" / re-opened local files) is instantly identifiable —
 // visible in Settings and as a small footer on the home screen.
-const APP_BUILD = "2026.08.21-before-flash-2";
+const APP_BUILD = "2026.08.21-before-flash-3";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -723,19 +723,33 @@ function MealCard({meal,onTap,onDelete}) {
     </div>
   </div>;
 }
-/* Quick "before" gut-check: flashes the pinned progress photo for about a
-   second right before Say It / Photo actually opens, then hands control
-   back via onDone so the caller can run whatever action was queued up. */
-function BeforeFlash({base64,onDone}) {
+/* Flashes the pinned "before" progress photo before Say It / Photo actually
+   proceeds. Two modes:
+   - auto (no onAction): holds briefly then calls onDone itself — fine for
+     Say It, since opening that screen is just app state, not gesture-gated.
+   - manual (onAction given): instead reveals a button after the hold that
+     the user has to tap to continue. The camera picker needs a direct, fresh
+     tap right when it opens — calling it automatically after any delay gets
+     silently blocked by the browser, which is what was sending Photo back
+     to the home screen instead of opening the camera. */
+function BeforeFlash({base64,onDone,onAction,actionLabel,holdMs=2000}) {
   const [visible,setVisible]=useState(false);
+  const [showAction,setShowAction]=useState(false);
   useEffect(()=>{
     const raf=requestAnimationFrame(()=>setVisible(true));
-    const hide=setTimeout(()=>setVisible(false),1800);
-    const done=setTimeout(()=>onDone(),2000);
+    if (onAction) {
+      const reveal=setTimeout(()=>setShowAction(true), holdMs);
+      return ()=>{ cancelAnimationFrame(raf); clearTimeout(reveal); };
+    }
+    const hide=setTimeout(()=>setVisible(false), holdMs-200);
+    const done=setTimeout(()=>onDone(), holdMs);
     return ()=>{ cancelAnimationFrame(raf); clearTimeout(hide); clearTimeout(done); };
   },[]);
-  return <div style={{position:"fixed",inset:0,zIndex:210,background:"rgba(10,10,15,0.9)",display:"flex",alignItems:"center",justifyContent:"center",opacity:visible?1:0,transition:"opacity 0.15s ease",pointerEvents:"none"}}>
-    <img src={`data:image/jpeg;base64,${base64}`} style={{maxWidth:"74%",maxHeight:"66%",borderRadius:18,objectFit:"cover",boxShadow:"0 8px 40px rgba(0,0,0,0.5)"}} alt=""/>
+  return <div style={{position:"fixed",inset:0,zIndex:210,background:"rgba(10,10,15,0.9)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:22,opacity:visible?1:0,transition:"opacity 0.15s ease",pointerEvents:onAction?"auto":"none"}}>
+    <img src={`data:image/jpeg;base64,${base64}`} style={{maxWidth:"74%",maxHeight:onAction?"56%":"66%",borderRadius:18,objectFit:"cover",boxShadow:"0 8px 40px rgba(0,0,0,0.5)"}} alt=""/>
+    {onAction&&<button
+      style={{background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"14px 30px",opacity:showAction?1:0,pointerEvents:showAction?"auto":"none",transition:"opacity 0.25s ease"}}
+      onClick={()=>{ onAction(); onDone(); }}>{actionLabel||"Continue →"}</button>}
   </div>;
 }
 /* Shown once, the first time the app is opened with no progress photo saved
@@ -898,6 +912,7 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
   const [weightVal,setWeightVal]=useState("");
   const [showWorkout,setShowWorkout]=useState(false);
   const [flashPhoto,setFlashPhoto]=useState(null);
+  const [flashMode,setFlashMode]=useState(null); // 'auto' (Say It) | 'manual' (Photo)
   const [showPhotoPrompt,setShowPhotoPrompt]=useState(false);
   const pendingActionRef=useRef(null);
   const fileRef=useRef();
@@ -907,16 +922,17 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
   useEffect(()=>{
     if (photoChecked && !beforePhoto && !hasSeenPhotoPrompt()) setShowPhotoPrompt(true);
   }, [photoChecked, beforePhoto]);
-  // Flash the pinned "before" photo for a couple seconds, then run fn (the
-  // actual next step). `immediate`, if given, runs synchronously right now —
-  // in the same tap — because the camera picker and the mic both require a
-  // fresh user gesture; firing them only after the flash's delay risks the
-  // browser silently blocking them, which is what was landing back on the
-  // home screen instead of opening the next step. Skipped straight to fn()
-  // if no before photo is pinned yet.
-  const triggerAction = (fn, immediate) => {
-    immediate?.();
-    if (beforePhoto?.base64) { pendingActionRef.current = fn || null; setFlashPhoto(beforePhoto.base64); }
+  // Flash the pinned "before" photo before Say It / Photo proceeds.
+  // mode "auto" advances on its own after the hold — fine for Say It, since
+  // opening that screen is just app state, nothing gesture-gated. mode
+  // "manual" instead waits for an explicit tap on the button BeforeFlash
+  // reveals, because the camera picker needs a direct, fresh tap of its own
+  // — calling it automatically after any delay gets silently blocked by the
+  // browser, which is what was sending Photo back to the home screen instead
+  // of opening the camera. Skipped straight to fn() if no before photo is
+  // pinned yet.
+  const triggerAction = (fn, mode='auto') => {
+    if (beforePhoto?.base64) { pendingActionRef.current = fn || null; setFlashMode(mode); setFlashPhoto(beforePhoto.base64); }
     else fn?.();
   };
   const food = meals.filter(m=>m.type!=="workout");
@@ -1051,15 +1067,18 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
     {showPhotoPrompt&&<FirstRunPhotoPrompt
       onAddPhoto={()=>{markSeenPhotoPrompt();setShowPhotoPrompt(false);onOpenProgress();}}
       onDismiss={()=>{markSeenPhotoPrompt();setShowPhotoPrompt(false);}}/>}
-    {flashPhoto&&<BeforeFlash base64={flashPhoto} onDone={()=>{const fn=pendingActionRef.current;pendingActionRef.current=null;setFlashPhoto(null);fn&&fn();}}/>}
+    {flashPhoto&&flashMode==='auto'&&<BeforeFlash base64={flashPhoto} onDone={()=>{const fn=pendingActionRef.current;pendingActionRef.current=null;setFlashPhoto(null);setFlashMode(null);fn&&fn();}}/>}
+    {flashPhoto&&flashMode==='manual'&&<BeforeFlash base64={flashPhoto} actionLabel="Take food photo →"
+      onAction={()=>{const fn=pendingActionRef.current;pendingActionRef.current=null;fn&&fn();}}
+      onDone={()=>{setFlashPhoto(null);setFlashMode(null);}}/>}
     {/* Docked action bar — fixed to the viewport so it stays under your thumb
         no matter how far down the meal list you've scrolled. */}
     <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:50,
       padding:"10px 16px calc(env(safe-area-inset-bottom,12px) + 10px)",
       background:`linear-gradient(180deg, rgba(10,10,15,0) 0%, ${C.bg} 22%)`}}>
       <div style={{display:"flex",gap:8}}>
-        <ActionBtn onClick={()=>triggerAction(onOpenDescribe, prewarmSpeech)} tone="accent" icon={<IcMic/>} label="Say it"/>
-        <ActionBtn onClick={()=>triggerAction(null, ()=>fileRef.current.click())} icon={<IcCamera/>} label="Photo"/>
+        <ActionBtn onClick={()=>{ prewarmSpeech(); triggerAction(onOpenDescribe, 'auto'); }} tone="accent" icon={<IcMic/>} label="Say it"/>
+        <ActionBtn onClick={()=>triggerAction(()=>fileRef.current.click(), 'manual')} icon={<IcCamera/>} label="Photo"/>
         <ActionBtn onClick={onOpenLibrary} icon={<IcStack/>} label="Recent"/>
         <ActionBtn onClick={()=>setShowWorkout(true)} tone="orange" icon={<span style={{fontSize:22,lineHeight:"22px"}}>🔥</span>} label="Workout"/>
       </div>
