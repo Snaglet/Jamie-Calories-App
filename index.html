@@ -27,7 +27,7 @@ button{font-family:'Inter',sans-serif;cursor:pointer}
 <div id="root">
   <div id="boot-fallback" style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0A0A0F;color:#F0F0F8;font-family:sans-serif;padding:24px;text-align:center;gap:12px;">
     <div style="width:36px;height:36px;border:3px solid rgba(255,255,255,0.1);border-top:3px solid #4AE68A;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
-    <p style="font-size:14px;opacity:0.7;">Loading Just Calories…</p>
+    <p style="font-size:14px;opacity:0.7;">Loading Just Calories...</p>
   </div>
 </div>
 <script>
@@ -94,6 +94,10 @@ button{font-family:'Inter',sans-serif;cursor:pointer}
 </script>
 <script type="text/plain" id="app-source">
 const { useState, useEffect, useRef, useCallback } = React;
+// Bumped on every delivered build so a stale cached copy (very common with
+// "Add to Home Screen" / re-opened local files) is instantly identifiable —
+// visible in Settings and as a small footer on the home screen.
+const APP_BUILD = "2026.08.21-before-flash-1";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -188,6 +192,24 @@ async function progressDelete(id) {
     tx.oncomplete = () => res(true);
     tx.onerror = () => rej(tx.error);
   });
+}
+/* Which progress photo counts as "the before picture" for the home-screen
+   flash — whatever's currently pinned in the Progress screen's Before pane,
+   persisted so Home can read it without that screen being open. */
+const loadBeforePhotoId = () => ls.get("jct:beforeid") || null;
+const saveBeforePhotoId = id => ls.set("jct:beforeid", id);
+const hasSeenPhotoPrompt = () => ls.get("jct:seenphotoprompt") === "1";
+const markSeenPhotoPrompt = () => ls.set("jct:seenphotoprompt", "1");
+/* Falls back to the earliest saved photo if nothing's been explicitly
+   pinned yet — matches the default the Progress screen itself picks on
+   first load, so the two stay in sync before the user ever repins it. */
+async function getPinnedBeforePhoto() {
+  try {
+    const all = await progressAll();
+    if (!all.length) return null;
+    const pinnedId = loadBeforePhotoId();
+    return (pinnedId && all.find(p=>p.id===pinnedId)) || all[0];
+  } catch(e) { console.warn("before-photo read failed:",e); return null; }
 }
 const loadMeals = d => { try { return JSON.parse(ls.get(`jct:m:${d}`) || "[]"); } catch { return []; } };
 const saveMeals = (d,m) => ls.set(`jct:m:${d}`, JSON.stringify(m));
@@ -637,7 +659,7 @@ function MealCard({meal,onTap,onDelete}) {
   const isWorkout=meal.type==="workout";
   const THRESHOLD=80;
   const srvSummary = !isWorkout && meal.ingredients?.length
-    ? meal.ingredients.map(i=>`${i.name}${i.servings && i.servings!==1 ? ` ×${i.servings}` : ""}`).slice(0,3).join(" · ") + (meal.ingredients.length>3?" …":"")
+    ? meal.ingredients.map(i=>`${i.name}${i.servings && i.servings!==1 ? ` ×${i.servings}` : ""}`).slice(0,3).join(" · ") + (meal.ingredients.length>3?" ...":"")
     : null;
   const onTS=e=>{tx.current=e.touches[0].clientX;ty.current=e.touches[0].clientY;setSwiping(false);};
   const onTM=e=>{const dx=e.touches[0].clientX-tx.current;const dy=Math.abs(e.touches[0].clientY-ty.current);if(dy>20&&Math.abs(dx)<20)return;if(dx<0){setSwiping(true);setSwipeX(Math.max(dx,-(THRESHOLD+30)));}};
@@ -672,6 +694,38 @@ function MealCard({meal,onTap,onDelete}) {
     </div>
   </div>;
 }
+/* Quick "before" gut-check: flashes the pinned progress photo for about a
+   second right before Say It / Photo actually opens, then hands control
+   back via onDone so the caller can run whatever action was queued up. */
+function BeforeFlash({base64,onDone}) {
+  const [visible,setVisible]=useState(false);
+  useEffect(()=>{
+    const raf=requestAnimationFrame(()=>setVisible(true));
+    const hide=setTimeout(()=>setVisible(false),820);
+    const done=setTimeout(()=>onDone(),1000);
+    return ()=>{ cancelAnimationFrame(raf); clearTimeout(hide); clearTimeout(done); };
+  },[]);
+  return <div style={{position:"fixed",inset:0,zIndex:210,background:"rgba(10,10,15,0.9)",display:"flex",alignItems:"center",justifyContent:"center",opacity:visible?1:0,transition:"opacity 0.15s ease",pointerEvents:"none"}}>
+    <img src={`data:image/jpeg;base64,${base64}`} style={{maxWidth:"74%",maxHeight:"66%",borderRadius:18,objectFit:"cover",boxShadow:"0 8px 40px rgba(0,0,0,0.5)"}} alt=""/>
+  </div>;
+}
+/* Shown once, the first time the app is opened with no progress photo saved
+   yet — nudges toward starting the before/after timeline early. Goal-neutral
+   copy since it works the same whether you're losing weight or bulking up. */
+function FirstRunPhotoPrompt({onAddPhoto,onDismiss}) {
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end",zIndex:100}} onClick={onDismiss}>
+    <div style={{width:"100%",background:C.surface,borderRadius:"20px 20px 0 0",padding:"28px 20px 40px",border:`1px solid ${C.border}`}} onClick={e=>e.stopPropagation()}>
+      <div style={{width:36,height:4,background:C.border,borderRadius:2,margin:"0 auto 20px"}}/>
+      <div style={{display:"flex",justifyContent:"center",marginBottom:14}}><span style={{fontSize:40}}>📸</span></div>
+      <p style={{fontSize:17,fontWeight:500,color:C.text,textAlign:"center",marginBottom:8}}>Add your before photo</p>
+      <p style={{fontSize:13,fontWeight:300,color:C.sub,textAlign:"center",lineHeight:1.6,marginBottom:22}}>
+        Snap one now so you can see your progress later — whether you're losing weight or bulking up, a side-by-side tells the story the scale can't.
+      </p>
+      <button style={{width:"100%",background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"16px",marginBottom:10}} onClick={onAddPhoto}>Add a photo →</button>
+      <button style={{width:"100%",background:"transparent",border:"none",color:C.sub,fontSize:14,fontWeight:400,padding:"10px"}} onClick={onDismiss}>Maybe later</button>
+    </div>
+  </div>;
+}
 function WorkoutModal({onAdd,onClose}) {
   const [cal,setCal]=useState("");
   const [label,setLabel]=useState(()=>ls.get("jct:lastlabel")||"");
@@ -694,7 +748,7 @@ function WorkoutModal({onAdd,onClose}) {
       <p style={{fontSize:17,fontWeight:500,color:C.text,marginBottom:4}}>Log workout</p>
       <p style={{fontSize:12,fontWeight:300,color:C.sub,marginBottom:20}}>Calories burned raise today's goal</p>
       <div style={{position:"relative",marginBottom:12}}>
-        <input type="text" placeholder="Activity (e.g. OrangeTheory, Walking…)" value={label} onChange={e=>handleLabelChange(e.target.value)} onBlur={()=>setTimeout(()=>setShowSugg(false),150)}
+        <input type="text" placeholder="Activity (e.g. OrangeTheory, Walking...)" value={label} onChange={e=>handleLabelChange(e.target.value)} onBlur={()=>setTimeout(()=>setShowSugg(false),150)}
           style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:15,padding:"12px 16px",outline:"none",fontFamily:"'Inter',sans-serif"}}/>
         {showSugg&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",zIndex:10,marginTop:4}}>
           {suggestions.map((s,i)=><div key={i} onMouseDown={()=>{setLabel(s);setShowSugg(false);}} style={{padding:"12px 16px",fontSize:14,color:C.text,cursor:"pointer",borderBottom:i<suggestions.length-1?`1px solid ${C.border}`:"none"}}>{s}</div>)}
@@ -712,7 +766,7 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal}) {
   const [err,setErr]=useState("");
   const [macros,setMacros]=useState(()=>macroTargets(goal));
   const [ov,setOv]=useState(()=>loadMacroOverrides());
-  const masked = apiKey ? `${apiKey.slice(0,14)}…${apiKey.slice(-4)}` : null;
+  const masked = apiKey ? `${apiKey.slice(0,14)}...${apiKey.slice(-4)}` : null;
   const submit=()=>{
     const t=val.trim();
     if(!t){setErr("Enter an API key to continue");return;}
@@ -742,7 +796,7 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal}) {
           :<p style={{fontSize:12,color:C.red,marginBottom:12,fontWeight:500}}>⚠ No key set — meals can't be analyzed</p>
         }
         <p style={{fontSize:12,color:C.sub,lineHeight:1.6,marginBottom:12}}>Get a key at <span style={{color:C.accent}}>platform.openai.com/api-keys</span>. Stored only on this device.</p>
-        <input type="password" placeholder={masked?"Enter a new key to replace…":"sk-..."} value={val}
+        <input type="password" placeholder={masked?"Enter a new key to replace...":"sk-..."} value={val}
           onChange={e=>{setVal(e.target.value);setErr("");setSaved(false);}}
           onKeyDown={e=>e.key==="Enter"&&submit()}
           style={{width:"100%",background:C.hover,border:`1px solid ${err?C.red:C.border}`,borderRadius:12,color:C.text,fontSize:14,padding:"13px 14px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:8}}/>
@@ -773,6 +827,7 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal}) {
         <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:8}}>Photos & storage</p>
         <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.7}}>Meal photos are saved on this device at {PHOTO_MAX_PX}px and cleared after {PHOTO_RETENTION_DAYS} days. Full meal entries (calories, ingredients) are automatically cleared after {MEAL_RETENTION_DAYS} days so the app never runs out of space. Progress photos are stored separately at {PROGRESS_MAX_PX}px and never expire. Nothing leaves your phone except the image sent for analysis.</p>
       </div>
+      <p style={{fontSize:10,fontWeight:300,color:C.dim,textAlign:"center",padding:"4px 0 8px"}}>Build {APP_BUILD}</p>
     </div>
   </div>;
 }
@@ -806,14 +861,29 @@ const ActionBtn = ({onClick,tone,icon,label}) => {
     <span style={{fontSize:10,fontWeight:400,color:fg,opacity:0.85}}>{label}</span>
   </button>;
 };
-function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAddWorkout,onOpenSettings,onOpenWeightHistory,onOpenProgress,onOpenMacro,meals,goal,baseGoal,setBaseGoal,date,setDate}) {
+function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAddWorkout,onOpenSettings,onOpenWeightHistory,onOpenProgress,onOpenMacro,meals,goal,baseGoal,setBaseGoal,date,setDate,beforePhoto,photoChecked}) {
   const [editGoal,setEditGoal]=useState(false);
   const [goalVal,setGoalVal]=useState(String(baseGoal));
   const [weightLog,setWeightLog]=useState(()=>loadWeights());
   const [editWeight,setEditWeight]=useState(false);
   const [weightVal,setWeightVal]=useState("");
   const [showWorkout,setShowWorkout]=useState(false);
+  const [flashPhoto,setFlashPhoto]=useState(null);
+  const [showPhotoPrompt,setShowPhotoPrompt]=useState(false);
+  const pendingActionRef=useRef(null);
   const fileRef=useRef();
+  // First time ever with no progress photo saved, nudge toward adding one.
+  // Shown once — hasSeenPhotoPrompt() stays true even if the photo is later
+  // deleted, so this doesn't come back uninvited.
+  useEffect(()=>{
+    if (photoChecked && !beforePhoto && !hasSeenPhotoPrompt()) setShowPhotoPrompt(true);
+  }, [photoChecked, beforePhoto]);
+  // Flash the pinned "before" photo for a beat before Say It / Photo actually
+  // opens. Skipped silently (fn runs immediately) if no photo is pinned yet.
+  const triggerAction = fn => {
+    if (beforePhoto?.base64) { pendingActionRef.current = fn; setFlashPhoto(beforePhoto.base64); }
+    else fn();
+  };
   const food = meals.filter(m=>m.type!=="workout");
   const eaten = food.reduce((s,m)=>s+m.totalCalories,0);
   const burned = meals.filter(m=>m.type==="workout").reduce((s,m)=>s+m.totalCalories,0);
@@ -938,16 +1008,23 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
         </div>
         :[...meals].reverse().map(m=><MealCard key={m.id} meal={m} onTap={onSelectMeal} onDelete={id=>onSelectMeal({...m,_delete:true})}/>)
       }
+      {/* Always-visible build stamp — the fastest way to tell whether a device
+          is actually running the latest file versus a stale cached copy. */}
+      <p style={{fontSize:9,fontWeight:300,color:C.dim,textAlign:"center",opacity:0.5,padding:"10px 0 0"}}>Build {APP_BUILD}</p>
     </div>
     {showWorkout&&<WorkoutModal onAdd={w=>{onAddWorkout(w);setShowWorkout(false);}} onClose={()=>setShowWorkout(false)}/>}
+    {showPhotoPrompt&&<FirstRunPhotoPrompt
+      onAddPhoto={()=>{markSeenPhotoPrompt();setShowPhotoPrompt(false);onOpenProgress();}}
+      onDismiss={()=>{markSeenPhotoPrompt();setShowPhotoPrompt(false);}}/>}
+    {flashPhoto&&<BeforeFlash base64={flashPhoto} onDone={()=>{const fn=pendingActionRef.current;pendingActionRef.current=null;setFlashPhoto(null);fn&&fn();}}/>}
     {/* Docked action bar — fixed to the viewport so it stays under your thumb
         no matter how far down the meal list you've scrolled. */}
     <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:50,
       padding:"10px 16px calc(env(safe-area-inset-bottom,12px) + 10px)",
       background:`linear-gradient(180deg, rgba(10,10,15,0) 0%, ${C.bg} 22%)`}}>
       <div style={{display:"flex",gap:8}}>
-        <ActionBtn onClick={onOpenDescribe} tone="accent" icon={<IcMic/>} label="Say it"/>
-        <ActionBtn onClick={()=>fileRef.current.click()} icon={<IcCamera/>} label="Photo"/>
+        <ActionBtn onClick={()=>triggerAction(onOpenDescribe)} tone="accent" icon={<IcMic/>} label="Say it"/>
+        <ActionBtn onClick={()=>triggerAction(()=>fileRef.current.click())} icon={<IcCamera/>} label="Photo"/>
         <ActionBtn onClick={onOpenLibrary} icon={<IcStack/>} label="Recent"/>
         <ActionBtn onClick={()=>setShowWorkout(true)} tone="orange" icon={<span style={{fontSize:22,lineHeight:"22px"}}>🔥</span>} label="Workout"/>
       </div>
@@ -973,7 +1050,7 @@ function DescribeScreen({apiKey,onBack,onAdd}) {
     speech.stop();
     setSubmitting(true); setRetryNote("");
     try {
-      const r = await analyze(apiKey, null, text, (n,max)=>setRetryNote(`Hit a snag — retrying (${n}/${max-1})…`));
+      const r = await analyze(apiKey, null, text, (n,max)=>setRetryNote(`Hit a snag — retrying (${n}/${max-1})...`));
       const now = new Date();
       onAdd({
         id:uid(), mealTitle:r.mealTitle, totalCalories:r.totalCalories,
@@ -984,7 +1061,7 @@ function DescribeScreen({apiKey,onBack,onAdd}) {
       });
     } catch(e) { setError(e.message||"Something went wrong — check Settings ⚙️"); setSubmitting(false); }
   };
-  if (submitting) return <Spinner text={retryNote||"Building your meal…"}/>;
+  if (submitting) return <Spinner text={retryNote||"Building your meal..."}/>;
   return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:40}}>
     <StickyHeader left={<HeaderBtn onClick={()=>{speech.stop();onBack();}}><IcBack/></HeaderBtn>} title="Say what you ate"/>
     <div style={{display:"flex",flexDirection:"column",gap:14,padding:"12px 20px 40px"}}>
@@ -1029,7 +1106,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
       // analyze() already retries transient failures (rate limits, dropped
       // connections, a response that got cut off) up to 3 times on its own —
       // this screen only shows an error after all of those attempts are spent.
-      const r = await analyze(apiKey, imageData, note || undefined, (n,max)=>setRetryNote(`Hit a snag — retrying (${n}/${max-1})…`));
+      const r = await analyze(apiKey, imageData, note || undefined, (n,max)=>setRetryNote(`Hit a snag — retrying (${n}/${max-1})...`));
       const now = new Date();
       onAdd({
         id:uid(), mealTitle:r.mealTitle, totalCalories:r.totalCalories,
@@ -1044,7 +1121,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
       setSubmitting(false);
     }
   };
-  if (submitting && !error) return <Spinner text={retryNote||"Analyzing with GPT-5.6 Sol…"}/>;
+  if (submitting && !error) return <Spinner text={retryNote||"Analyzing with GPT-5.6 Sol..."}/>;
   return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column"}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 8px) 16px 8px",flexShrink:0}}>
       <button style={{width:40,height:40,borderRadius:11,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{speech.stop();onBack();}}><IcBack/></button>
@@ -1066,7 +1143,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
         }
       </div>}
       <textarea style={{width:"100%",height:60,background:C.surface,border:`1px solid ${note?C.aMid:C.border}`,borderRadius:12,color:note?C.text:C.sub,fontSize:13,padding:"10px 14px",resize:"none",outline:"none",fontFamily:"'Inter',sans-serif",lineHeight:1.55}}
-        placeholder="Notes (optional) — ingredients, portions, brand…"
+        placeholder="Notes (optional) — ingredients, portions, brand..."
         value={note} onChange={e=>setNote(e.target.value)}/>
       {error&&<div style={{background:C.rDim,border:`1px solid ${C.rMid}`,borderRadius:12,padding:"12px 14px",marginBottom:2}}>
         <p style={{color:C.red,fontSize:13,fontWeight:600,lineHeight:1.5}}>⚠ {error}</p>
@@ -1270,7 +1347,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     speech.stop();
     setAddLoading(true); setAddError("");
     try {
-      const r = await analyze(apiKey, null, addText, (n,max)=>setAddLoading(`Retrying (${n}/${max-1})…`));
+      const r = await analyze(apiKey, null, addText, (n,max)=>setAddLoading(`Retrying (${n}/${max-1})...`));
       const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0}];
       const extra = {};
       if (!meal.emoji || meal.mealTitle === "New meal") extra.emoji = r.emoji || meal.emoji;
@@ -1280,11 +1357,11 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     setAddLoading(false);
   };
   const addByPhoto = async file => {
-    setBusyMsg("Analyzing item…");
+    setBusyMsg("Analyzing item...");
     try {
       const shot = await fileToImageData(file);
       if (!shot) { setBusyMsg(""); setAddError("Couldn't read that photo"); return; }
-      const r = await analyze(apiKey, shot.imageData, null, (n,max)=>setBusyMsg(`Hit a snag — retrying (${n}/${max-1})…`));
+      const r = await analyze(apiKey, shot.imageData, null, (n,max)=>setBusyMsg(`Hit a snag — retrying (${n}/${max-1})...`));
       const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0}];
       const extra = {};
       if (!meal.imageBase64) {
@@ -1413,7 +1490,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
           <div style={{display:"flex",gap:8}}>
             <button style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,borderRadius:10,color:C.sub,fontSize:13,fontWeight:500,padding:"10px"}} onClick={()=>{speech.stop();setAdding(false);setAddText("");setAddError("");}}>Cancel</button>
             <button style={{flex:2,background:addLoading?"transparent":C.accent,border:addLoading?`1px solid ${C.aMid}`:"none",borderRadius:10,color:addLoading?C.accent:C.bg,fontSize:13,fontWeight:500,padding:"10px",opacity:addText.trim()?1:0.35}} onClick={addByText} disabled={!addText.trim()||addLoading}>
-              {addLoading ? (typeof addLoading==="string" ? addLoading : "Calculating…") : "Add item →"}
+              {addLoading ? (typeof addLoading==="string" ? addLoading : "Calculating...") : "Add item →"}
             </button>
           </div>
         </div>}
@@ -1462,6 +1539,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     </div>}
   </div>;
 }
+
 function LibraryScreen({onBack,onPreviewMeal,onPreviewItem}) {
   const [tab,setTab]=useState("meals");
   const [lib,setLib]=useState(()=>loadLibrary().sort(recencySort));
@@ -1582,6 +1660,7 @@ function LibraryItemRow({item,onPick,onDelete}) {
     </div>
   </div>;
 }
+
 /* Preview a recent meal template or ingredient before committing it to today.
    For a meal template you can add the whole thing or check off just the
    items you actually want. */
@@ -1706,8 +1785,12 @@ function ProgressScreen({onBack}) {
     } else { setAId(null); setBId(null); }
   };
   useEffect(()=>{ refresh(); },[]);
+  // Whatever ends up in the "Before" pane — the automatic earliest-photo
+  // default from refresh() above, or an explicit re-pin — is what the
+  // home-screen flash shows, so keep it persisted the moment it changes.
+  useEffect(()=>{ if(aId) saveBeforePhotoId(aId); },[aId]);
   const add = async file => {
-    setBusy("Saving photo…");
+    setBusy("Saving photo...");
     try {
       const shot = await fileToImageData(file, PROGRESS_MAX_PX);
       if (shot) {
@@ -1725,7 +1808,7 @@ function ProgressScreen({onBack}) {
     setBusy("");
   };
   const remove = async id => {
-    setBusy("Removing…");
+    setBusy("Removing...");
     try { await progressDelete(id); await refresh(); } catch(e) { console.warn(e); }
     setConfirmDel(null);
     setBusy("");
@@ -1764,7 +1847,7 @@ function ProgressScreen({onBack}) {
     <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{
       const f=e.target.files[0]; e.target.value=""; if(f) add(f);
     }}/>
-    {loading&&<p style={{color:C.sub,fontSize:13,textAlign:"center",padding:"48px 0"}}>Loading…</p>}
+    {loading&&<p style={{color:C.sub,fontSize:13,textAlign:"center",padding:"48px 0"}}>Loading...</p>}
     {!loading&&photos.length===0&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"64px 32px",gap:12}}>
       <span style={{fontSize:40}}>📸</span>
       <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center",lineHeight:1.6}}>Take your first photo to start the timeline. Same spot, same light, same time of day works best.</p>
@@ -1929,6 +2012,10 @@ function App() {
   const [camImg,setCamImg]=useState({imageData:null,preview:null});
   const [macroMetric,setMacroMetric]=useState("protein");
   const [preview,setPreview]=useState(null);
+  const [beforePhoto,setBeforePhoto]=useState(null);
+  const [photoChecked,setPhotoChecked]=useState(false);
+  const refreshBeforePhoto = () => { getPinnedBeforePhoto().then(p=>{ setBeforePhoto(p); setPhotoChecked(true); }); };
+  useEffect(()=>{ refreshBeforePhoto(); },[]);
   const dateKeyRef=useRef(fmtKey(new Date()));
   const [,forceRender]=useState(0);
   const bump=()=>forceRender(n=>n+1);
@@ -2026,6 +2113,7 @@ function App() {
       meals={meals} goal={effectiveGoal} baseGoal={baseGoal}
       setBaseGoal={n=>{setBaseGoal(n);saveBaseGoal(n);}}
       date={new Date(dateKey+"T12:00:00")} setDate={changeDate}
+      beforePhoto={beforePhoto} photoChecked={photoChecked}
     />}
     {screen==="camera"&&<PhotoScreen apiKey={apiKey} imageData={camImg.imageData} imagePreview={camImg.preview} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
     {screen==="describe"&&<DescribeScreen apiKey={apiKey} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
@@ -2037,7 +2125,7 @@ function App() {
       onAddWhole={tpl=>addFromLibrary(tpl)}
       onAddSelected={(tpl,ings)=>addFromLibrary(tpl,ings)}
       onAddItem={addItemAsMeal}/>}
-    {screen==="progress"&&<ProgressScreen onBack={()=>setScreen("home")}/>}
+    {screen==="progress"&&<ProgressScreen onBack={()=>{setScreen("home");refreshBeforePhoto();}}/>}
     {screen==="detail"&&selected&&<DetailScreen meal={selected} onBack={leaveDetail} onUpdate={updateMeal} onDelete={deleteMeal} apiKey={apiKey}/>}
     {screen==="settings"&&<SettingsScreen apiKey={apiKey} onSave={saveApiKey} onClear={clearApiKey} onBack={()=>setScreen("home")} goal={effectiveGoal}/>}
     {screen==="weightHistory"&&<WeightHistoryScreen onBack={()=>setScreen("home")}/>}
