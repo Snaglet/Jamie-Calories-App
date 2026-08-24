@@ -97,7 +97,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // Bumped on every delivered build so a stale cached copy (very common with
 // "Add to Home Screen" / re-opened local files) is instantly identifiable —
 // visible in Settings and as a small footer on the home screen.
-const APP_BUILD = "2026.08.21-before-flash-3";
+const APP_BUILD = "2026.08.21-front-side-1";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -193,23 +193,40 @@ async function progressDelete(id) {
     tx.onerror = () => rej(tx.error);
   });
 }
-/* Which progress photo counts as "the before picture" for the home-screen
-   flash — whatever's currently pinned in the Progress screen's Before pane,
-   persisted so Home can read it without that screen being open. */
-const loadBeforePhotoId = () => ls.get("jct:beforeid") || null;
-const saveBeforePhotoId = id => ls.set("jct:beforeid", id);
+/* Progress photos come in two categories — Front and Side — each with its
+   own Before/After pair. PROGRESS_CATEGORIES drives the Progress screen's
+   tabs; any photo missing a category (saved before categories existed)
+   is treated as "front" everywhere, so nothing from before this update
+   disappears. */
+const PROGRESS_CATEGORIES = [{key:"front",label:"Front"},{key:"side",label:"Side"}];
+const photoCategory = p => p?.category || "front";
+/* Which photo counts as "the before picture" for a given category — whatever
+   is currently pinned in that category's Before pane on the Progress screen,
+   persisted so Home can read it without that screen being open. Front falls
+   back to the pre-category single pin key so photos pinned before this
+   update keep pointing at the same photo. */
+const loadBeforePhotoId = cat => ls.get(`jct:beforeid:${cat}`) || (cat==="front" ? ls.get("jct:beforeid") : null) || null;
+const saveBeforePhotoId = (cat,id) => ls.set(`jct:beforeid:${cat}`, id);
 const hasSeenPhotoPrompt = () => ls.get("jct:seenphotoprompt") === "1";
 const markSeenPhotoPrompt = () => ls.set("jct:seenphotoprompt", "1");
-/* Falls back to the earliest saved photo if nothing's been explicitly
-   pinned yet — matches the default the Progress screen itself picks on
-   first load, so the two stay in sync before the user ever repins it. */
-async function getPinnedBeforePhoto() {
+/* Falls back to the earliest saved photo in each category if nothing's been
+   explicitly pinned yet — matches the default the Progress screen itself
+   picks on first load, so the two stay in sync before the user ever repins
+   one. Returns one entry per category, either a photo record or null. */
+async function getPinnedBeforePhotos() {
+  const empty = {front:null, side:null};
   try {
     const all = await progressAll();
-    if (!all.length) return null;
-    const pinnedId = loadBeforePhotoId();
-    return (pinnedId && all.find(p=>p.id===pinnedId)) || all[0];
-  } catch(e) { console.warn("before-photo read failed:",e); return null; }
+    if (!all.length) return empty;
+    const out = {};
+    PROGRESS_CATEGORIES.forEach(({key}) => {
+      const list = all.filter(p => photoCategory(p) === key);
+      if (!list.length) { out[key] = null; return; }
+      const pinnedId = loadBeforePhotoId(key);
+      out[key] = (pinnedId && list.find(p=>p.id===pinnedId)) || list[0];
+    });
+    return out;
+  } catch(e) { console.warn("before-photos read failed:",e); return empty; }
 }
 const loadMeals = d => { try { return JSON.parse(ls.get(`jct:m:${d}`) || "[]"); } catch { return []; } };
 const saveMeals = (d,m) => ls.set(`jct:m:${d}`, JSON.stringify(m));
@@ -732,7 +749,7 @@ function MealCard({meal,onTap,onDelete}) {
      tap right when it opens — calling it automatically after any delay gets
      silently blocked by the browser, which is what was sending Photo back
      to the home screen instead of opening the camera. */
-function BeforeFlash({base64,onDone,onAction,actionLabel,holdMs=2000}) {
+function BeforeFlash({photos,onDone,onAction,actionLabel,holdMs=2000}) {
   const [visible,setVisible]=useState(false);
   const [showAction,setShowAction]=useState(false);
   useEffect(()=>{
@@ -745,8 +762,16 @@ function BeforeFlash({base64,onDone,onAction,actionLabel,holdMs=2000}) {
     const done=setTimeout(()=>onDone(), holdMs);
     return ()=>{ cancelAnimationFrame(raf); clearTimeout(hide); clearTimeout(done); };
   },[]);
+  // One photo (only one category pinned) gets shown large; two (Front + Side
+  // both pinned) sit side by side, each sized down to still fit the screen.
+  const list = photos||[];
+  const imgSize = list.length>1
+    ? {maxWidth:"44%",maxHeight:onAction?"50%":"60%"}
+    : {maxWidth:"74%",maxHeight:onAction?"56%":"66%"};
   return <div style={{position:"fixed",inset:0,zIndex:210,background:"rgba(10,10,15,0.9)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:22,opacity:visible?1:0,transition:"opacity 0.15s ease",pointerEvents:onAction?"auto":"none"}}>
-    <img src={`data:image/jpeg;base64,${base64}`} style={{maxWidth:"74%",maxHeight:onAction?"56%":"66%",borderRadius:18,objectFit:"cover",boxShadow:"0 8px 40px rgba(0,0,0,0.5)"}} alt=""/>
+    <div style={{display:"flex",gap:14,alignItems:"center",justifyContent:"center"}}>
+      {list.map((b64,i)=><img key={i} src={`data:image/jpeg;base64,${b64}`} style={{...imgSize,borderRadius:18,objectFit:"cover",boxShadow:"0 8px 40px rgba(0,0,0,0.5)"}} alt=""/>)}
+    </div>
     {onAction&&<button
       style={{background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"14px 30px",opacity:showAction?1:0,pointerEvents:showAction?"auto":"none",transition:"opacity 0.25s ease"}}
       onClick={()=>{ onAction(); onDone(); }}>{actionLabel||"Continue →"}</button>}
@@ -904,25 +929,27 @@ const ActionBtn = ({onClick,tone,icon,label}) => {
     <span style={{fontSize:10,fontWeight:400,color:fg,opacity:0.85}}>{label}</span>
   </button>;
 };
-function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAddWorkout,onOpenSettings,onOpenWeightHistory,onOpenProgress,onOpenMacro,meals,goal,baseGoal,setBaseGoal,date,setDate,beforePhoto,photoChecked}) {
+function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAddWorkout,onOpenSettings,onOpenWeightHistory,onOpenProgress,onOpenMacro,meals,goal,baseGoal,setBaseGoal,date,setDate,beforePhotos,photoChecked}) {
   const [editGoal,setEditGoal]=useState(false);
   const [goalVal,setGoalVal]=useState(String(baseGoal));
   const [weightLog,setWeightLog]=useState(()=>loadWeights());
   const [editWeight,setEditWeight]=useState(false);
   const [weightVal,setWeightVal]=useState("");
   const [showWorkout,setShowWorkout]=useState(false);
-  const [flashPhoto,setFlashPhoto]=useState(null);
+  const [flashPhotos,setFlashPhotos]=useState(null);
   const [flashMode,setFlashMode]=useState(null); // 'auto' (Say It) | 'manual' (Photo)
   const [showPhotoPrompt,setShowPhotoPrompt]=useState(false);
   const pendingActionRef=useRef(null);
   const fileRef=useRef();
-  // First time ever with no progress photo saved, nudge toward adding one.
-  // Shown once — hasSeenPhotoPrompt() stays true even if the photo is later
-  // deleted, so this doesn't come back uninvited.
+  // Front and/or Side before photo, whichever are pinned — flashed together.
+  const beforeList = [beforePhotos?.front?.base64, beforePhotos?.side?.base64].filter(Boolean);
+  // First time ever with no progress photo in either category, nudge toward
+  // adding one. Shown once — hasSeenPhotoPrompt() stays true even if every
+  // photo is later deleted, so this doesn't come back uninvited.
   useEffect(()=>{
-    if (photoChecked && !beforePhoto && !hasSeenPhotoPrompt()) setShowPhotoPrompt(true);
-  }, [photoChecked, beforePhoto]);
-  // Flash the pinned "before" photo before Say It / Photo proceeds.
+    if (photoChecked && !beforeList.length && !hasSeenPhotoPrompt()) setShowPhotoPrompt(true);
+  }, [photoChecked, beforePhotos]);
+  // Flash the pinned "before" photo(s) before Say It / Photo proceeds.
   // mode "auto" advances on its own after the hold — fine for Say It, since
   // opening that screen is just app state, nothing gesture-gated. mode
   // "manual" instead waits for an explicit tap on the button BeforeFlash
@@ -930,9 +957,9 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
   // — calling it automatically after any delay gets silently blocked by the
   // browser, which is what was sending Photo back to the home screen instead
   // of opening the camera. Skipped straight to fn() if no before photo is
-  // pinned yet.
+  // pinned in either category yet.
   const triggerAction = (fn, mode='auto') => {
-    if (beforePhoto?.base64) { pendingActionRef.current = fn || null; setFlashMode(mode); setFlashPhoto(beforePhoto.base64); }
+    if (beforeList.length) { pendingActionRef.current = fn || null; setFlashMode(mode); setFlashPhotos(beforeList); }
     else fn?.();
   };
   const food = meals.filter(m=>m.type!=="workout");
@@ -1034,6 +1061,7 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
                 :<span style={{fontSize:32,fontWeight:200,color:C.text,letterSpacing:"-1.5px",lineHeight:1,cursor:"pointer"}} onClick={()=>{setWeightVal(latestW>0?String(latestW):"");setEditWeight(true);}}>{latestW>0?latestW:"—"}</span>
               }
               <span style={{fontSize:12,fontWeight:300,color:C.dim}}>lbs</span>
+              {editWeight&&<button style={{width:28,height:28,borderRadius:"50%",background:C.accent,border:"none",color:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,flexShrink:0,marginLeft:2}} onClick={commitWeight}>✓</button>}
               {!editWeight&&<span style={{color:C.dim,cursor:"pointer",display:"inline-flex"}} onClick={()=>{setWeightVal(latestW>0?String(latestW):"");setEditWeight(true);}}><IcEdit/></span>}
               {weekDelta!==null&&!editWeight&&<span style={{fontSize:12,fontWeight:300,color:weekDelta<0?C.accent:C.orange,marginLeft:2}}>
                 {weekDelta<0?"↓":"↑"}{Math.abs(weekDelta)} / 7d
@@ -1067,10 +1095,10 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
     {showPhotoPrompt&&<FirstRunPhotoPrompt
       onAddPhoto={()=>{markSeenPhotoPrompt();setShowPhotoPrompt(false);onOpenProgress();}}
       onDismiss={()=>{markSeenPhotoPrompt();setShowPhotoPrompt(false);}}/>}
-    {flashPhoto&&flashMode==='auto'&&<BeforeFlash base64={flashPhoto} onDone={()=>{const fn=pendingActionRef.current;pendingActionRef.current=null;setFlashPhoto(null);setFlashMode(null);fn&&fn();}}/>}
-    {flashPhoto&&flashMode==='manual'&&<BeforeFlash base64={flashPhoto} actionLabel="Take food photo →"
+    {flashPhotos&&flashMode==='auto'&&<BeforeFlash photos={flashPhotos} onDone={()=>{const fn=pendingActionRef.current;pendingActionRef.current=null;setFlashPhotos(null);setFlashMode(null);fn&&fn();}}/>}
+    {flashPhotos&&flashMode==='manual'&&<BeforeFlash photos={flashPhotos} actionLabel="Take food photo →"
       onAction={()=>{const fn=pendingActionRef.current;pendingActionRef.current=null;fn&&fn();}}
-      onDone={()=>{setFlashPhoto(null);setFlashMode(null);}}/>}
+      onDone={()=>{setFlashPhotos(null);setFlashMode(null);}}/>}
     {/* Docked action bar — fixed to the viewport so it stays under your thumb
         no matter how far down the meal list you've scrolled. */}
     <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:50,
@@ -1820,7 +1848,8 @@ function ProgressThumb({photo,isA,isB,activeSlot,setAId,setBId,confirmId,setConf
   </div>;
 }
 function ProgressScreen({onBack}) {
-  const [photos,setPhotos]=useState([]);
+  const [cat,setCat]=useState("front");
+  const [photos,setPhotos]=useState([]); // all categories; filtered per-render below
   const [loading,setLoading]=useState(true);
   const [aId,setAId]=useState(null);
   const [bId,setBId]=useState(null);
@@ -1833,16 +1862,30 @@ function ProgressScreen({onBack}) {
     const all = await progressAll();
     setPhotos(all);
     setLoading(false);
-    if (all.length) {
-      setAId(prev => prev && all.find(p=>p.id===prev) ? prev : all[0].id);
-      setBId(prev => prev && all.find(p=>p.id===prev) ? prev : all[all.length-1].id);
-    } else { setAId(null); setBId(null); }
   };
   useEffect(()=>{ refresh(); },[]);
+  // Whenever the active tab or the underlying photo list changes, recompute
+  // that category's own Before/After pair — defaulting to the earliest and
+  // latest photo IN THAT CATEGORY, or to whatever's already pinned as Before
+  // for it if that's still valid. Front and Side keep entirely separate
+  // pins, so switching tabs never clobbers the other category's picks.
+  useEffect(()=>{
+    const list = photos.filter(p => photoCategory(p) === cat);
+    if (!list.length) { setAId(null); setBId(null); return; }
+    // Decide purely from the persisted pin for THIS category, not the
+    // in-memory aId left over from whichever tab was open before — mixing
+    // the two across a tab switch is what let one category's Before photo
+    // leak into the other's pin for a render.
+    const pinned = loadBeforePhotoId(cat);
+    const nextA = (pinned && list.find(p=>p.id===pinned)) ? pinned : list[0].id;
+    setAId(nextA);
+    saveBeforePhotoId(cat, nextA);
+    setBId(prev => (prev && list.find(p=>p.id===prev)) ? prev : list[list.length-1].id);
+  }, [cat, photos]);
   // Whatever ends up in the "Before" pane — the automatic earliest-photo
-  // default from refresh() above, or an explicit re-pin — is what the
-  // home-screen flash shows, so keep it persisted the moment it changes.
-  useEffect(()=>{ if(aId) saveBeforePhotoId(aId); },[aId]);
+  // default above, or an explicit re-pin — is what the home-screen flash
+  // shows for this category, so keep it persisted the moment it changes.
+  useEffect(()=>{ if(aId) saveBeforePhotoId(cat, aId); },[aId, cat]);
   const add = async file => {
     setBusy("Saving photo...");
     try {
@@ -1850,13 +1893,15 @@ function ProgressScreen({onBack}) {
       if (shot) {
         const thumb = await makeThumbnail(shot.imageData.base64, "image/jpeg", PROGRESS_MAX_PX, PROGRESS_QUALITY);
         const takenAt = Date.now();
+        const id = "p"+takenAt;
         await progressPut({
-          id:"p"+takenAt, takenAt,
+          id, takenAt,
           dateKey: fmtKey(new Date()),
+          category: cat,
           base64: thumb || shot.imageData.base64
         });
         await refresh();
-        setBId("p"+takenAt);
+        setBId(id);
       }
     } catch(e) { console.warn("progress save failed:",e); }
     setBusy("");
@@ -1867,13 +1912,19 @@ function ProgressScreen({onBack}) {
     setConfirmDel(null);
     setBusy("");
   };
-  const byId = id => photos.find(p=>p.id===id);
+  const catPhotos = photos.filter(p => photoCategory(p) === cat);
+  const catLabel = PROGRESS_CATEGORIES.find(c=>c.key===cat)?.label || cat;
+  const byId = id => catPhotos.find(p=>p.id===id);
   const weightOn = dateKey => weights.find(w=>w.date===dateKey)?.value;
   const a = byId(aId), b = byId(bId);
   const dayGap = a && b ? Math.round(Math.abs(b.takenAt-a.takenAt)/86400000) : 0;
   const wA = a && weightOn(a.dateKey), wB = b && weightOn(b.dateKey);
   const wDelta = (wA!=null && wB!=null) ? Math.round((wB-wA)*10)/10 : null;
   if (busy) return <Spinner text={busy}/>;
+  const Tab = ({id,label}) => <button
+    style={{flex:1,padding:"9px",borderRadius:10,border:"none",fontSize:13,fontWeight:400,
+      background: cat===id?C.aDim:"transparent", color: cat===id?C.accent:C.sub}}
+    onClick={()=>setCat(id)}>{label}</button>;
   const Pane = ({photo,slot,label}) => {
     const active = activeSlot===slot;
     return <div style={{flex:1,minWidth:0}} onClick={()=>setActiveSlot(slot)}>
@@ -1901,17 +1952,22 @@ function ProgressScreen({onBack}) {
     <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{
       const f=e.target.files[0]; e.target.value=""; if(f) add(f);
     }}/>
+    <div style={{padding:"14px 16px 0"}}>
+      <div style={{display:"flex",gap:4,background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:4}}>
+        {PROGRESS_CATEGORIES.map(c=><Tab key={c.key} id={c.key} label={c.label}/>)}
+      </div>
+    </div>
     {loading&&<p style={{color:C.sub,fontSize:13,textAlign:"center",padding:"48px 0"}}>Loading...</p>}
-    {!loading&&photos.length===0&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"64px 32px",gap:12}}>
+    {!loading&&catPhotos.length===0&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"56px 32px",gap:12}}>
       <span style={{fontSize:40}}>📸</span>
-      <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center",lineHeight:1.6}}>Take your first photo to start the timeline. Same spot, same light, same time of day works best.</p>
+      <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center",lineHeight:1.6}}>Take your first {catLabel.toLowerCase()} photo to start that timeline. Same spot, same light, same time of day works best.</p>
       <button style={{marginTop:6,display:"flex",alignItems:"center",gap:8,background:C.accent,border:"none",borderRadius:13,color:C.bg,fontSize:14,fontWeight:500,padding:"13px 22px"}} onClick={()=>fileRef.current.click()}>
-        <IcCamera size={17}/> Take photo
+        <IcCamera size={17}/> Take {catLabel.toLowerCase()} photo
       </button>
     </div>}
-    {!loading&&photos.length>0&&<div style={{padding:"16px 16px 0"}}>
-      {photos.length===1
-        ? <p style={{fontSize:12,fontWeight:300,color:C.dim,textAlign:"center",marginBottom:14,lineHeight:1.6}}>One photo so far. Take another later and they'll appear side by side.</p>
+    {!loading&&catPhotos.length>0&&<div style={{padding:"16px 16px 0"}}>
+      {catPhotos.length===1
+        ? <p style={{fontSize:12,fontWeight:300,color:C.dim,textAlign:"center",marginBottom:14,lineHeight:1.6}}>One {catLabel.toLowerCase()} photo so far. Take another later and they'll appear side by side.</p>
         : <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:14}}>
             <span style={{fontSize:12,fontWeight:300,color:C.sub}}>{dayGap} {dayGap===1?"day":"days"} apart</span>
             {wDelta!==null&&<span style={{fontSize:12,fontWeight:300,color:wDelta<0?C.accent:C.orange}}>
@@ -1926,7 +1982,7 @@ function ProgressScreen({onBack}) {
         Tap a pane to select it, then pick a photo below. Long-press (or right-click) a photo to delete it.
       </p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:8,paddingBottom:20}}>
-        {[...photos].reverse().map(p=>
+        {[...catPhotos].reverse().map(p=>
           <ProgressThumb key={p.id} photo={p} isA={p.id===aId} isB={p.id===bId}
             activeSlot={activeSlot} setAId={setAId} setBId={setBId}
             confirmId={confirmDel} setConfirmId={setConfirmDel} onDelete={remove}/>
@@ -2053,6 +2109,7 @@ function WeightRow({entry,isEditing,editVal,setEditVal,onTapEdit,onCommit,onDele
           :<span style={{fontSize:18,fontWeight:200,color:C.text,letterSpacing:"-0.5px",cursor:"pointer"}} onClick={onTapEdit}>{entry.value}</span>
         }
         <span style={{fontSize:11,fontWeight:300,color:C.dim}}>lbs</span>
+        {isEditing&&<button style={{width:24,height:24,borderRadius:"50%",background:C.accent,border:"none",color:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0}} onClick={onCommit}>✓</button>}
         {!isEditing&&<span style={{color:C.dim,cursor:"pointer",display:"inline-flex",alignItems:"center"}} onClick={onTapEdit}><IcEdit/></span>}
       </div>
     </div>
@@ -2066,9 +2123,9 @@ function App() {
   const [camImg,setCamImg]=useState({imageData:null,preview:null});
   const [macroMetric,setMacroMetric]=useState("protein");
   const [preview,setPreview]=useState(null);
-  const [beforePhoto,setBeforePhoto]=useState(null);
+  const [beforePhotos,setBeforePhotos]=useState({front:null, side:null});
   const [photoChecked,setPhotoChecked]=useState(false);
-  const refreshBeforePhoto = () => { getPinnedBeforePhoto().then(p=>{ setBeforePhoto(p); setPhotoChecked(true); }); };
+  const refreshBeforePhoto = () => { getPinnedBeforePhotos().then(p=>{ setBeforePhotos(p); setPhotoChecked(true); }); };
   useEffect(()=>{ refreshBeforePhoto(); },[]);
   const dateKeyRef=useRef(fmtKey(new Date()));
   const [,forceRender]=useState(0);
@@ -2167,7 +2224,7 @@ function App() {
       meals={meals} goal={effectiveGoal} baseGoal={baseGoal}
       setBaseGoal={n=>{setBaseGoal(n);saveBaseGoal(n);}}
       date={new Date(dateKey+"T12:00:00")} setDate={changeDate}
-      beforePhoto={beforePhoto} photoChecked={photoChecked}
+      beforePhotos={beforePhotos} photoChecked={photoChecked}
     />}
     {screen==="camera"&&<PhotoScreen apiKey={apiKey} imageData={camImg.imageData} imagePreview={camImg.preview} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
     {screen==="describe"&&<DescribeScreen apiKey={apiKey} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
