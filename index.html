@@ -97,7 +97,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // Bumped on every delivered build so a stale cached copy (very common with
 // "Add to Home Screen" / re-opened local files) is instantly identifiable —
 // visible in Settings and as a small footer on the home screen.
-const APP_BUILD = "2026.08.21-front-side-1";
+const APP_BUILD = "2026.08.21-side-only-flash-1";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -762,12 +762,14 @@ function BeforeFlash({photos,onDone,onAction,actionLabel,holdMs=2000}) {
     const done=setTimeout(()=>onDone(), holdMs);
     return ()=>{ cancelAnimationFrame(raf); clearTimeout(hide); clearTimeout(done); };
   },[]);
-  // One photo (only one category pinned) gets shown large; two (Front + Side
-  // both pinned) sit side by side, each sized down to still fit the screen.
+  // A single photo (the normal case now — just the Side before shot) fills
+  // most of the screen so it actually reads clearly; if more than one is
+  // ever passed in, they fall back to sitting side by side, sized down to
+  // still fit.
   const list = photos||[];
   const imgSize = list.length>1
     ? {maxWidth:"44%",maxHeight:onAction?"50%":"60%"}
-    : {maxWidth:"74%",maxHeight:onAction?"56%":"66%"};
+    : {maxWidth:"88%",maxHeight:onAction?"62%":"78%"};
   return <div style={{position:"fixed",inset:0,zIndex:210,background:"rgba(10,10,15,0.9)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:22,opacity:visible?1:0,transition:"opacity 0.15s ease",pointerEvents:onAction?"auto":"none"}}>
     <div style={{display:"flex",gap:14,alignItems:"center",justifyContent:"center"}}>
       {list.map((b64,i)=><img key={i} src={`data:image/jpeg;base64,${b64}`} style={{...imgSize,borderRadius:18,objectFit:"cover",boxShadow:"0 8px 40px rgba(0,0,0,0.5)"}} alt=""/>)}
@@ -941,23 +943,29 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
   const [showPhotoPrompt,setShowPhotoPrompt]=useState(false);
   const pendingActionRef=useRef(null);
   const fileRef=useRef();
-  // Front and/or Side before photo, whichever are pinned — flashed together.
-  const beforeList = [beforePhotos?.front?.base64, beforePhotos?.side?.base64].filter(Boolean);
+  // Only the Side "before" photo flashes now — shown full size, single
+  // image, rather than paired with Front — per request. If Side has no
+  // photo pinned yet, the flash is skipped entirely (no fallback to Front).
+  const beforeList = [beforePhotos?.side?.base64].filter(Boolean);
+  // First-run nudge is about starting the progress timeline at all, so it
+  // still cares about either category — separate from beforeList above,
+  // which is deliberately Side-only for the flash itself.
+  const hasAnyBeforePhoto = !!(beforePhotos?.front || beforePhotos?.side);
   // First time ever with no progress photo in either category, nudge toward
   // adding one. Shown once — hasSeenPhotoPrompt() stays true even if every
   // photo is later deleted, so this doesn't come back uninvited.
   useEffect(()=>{
-    if (photoChecked && !beforeList.length && !hasSeenPhotoPrompt()) setShowPhotoPrompt(true);
+    if (photoChecked && !hasAnyBeforePhoto && !hasSeenPhotoPrompt()) setShowPhotoPrompt(true);
   }, [photoChecked, beforePhotos]);
-  // Flash the pinned "before" photo(s) before Say It / Photo proceeds.
+  // Flash the pinned Side "before" photo before Say It / Photo proceeds.
   // mode "auto" advances on its own after the hold — fine for Say It, since
   // opening that screen is just app state, nothing gesture-gated. mode
   // "manual" instead waits for an explicit tap on the button BeforeFlash
   // reveals, because the camera picker needs a direct, fresh tap of its own
   // — calling it automatically after any delay gets silently blocked by the
   // browser, which is what was sending Photo back to the home screen instead
-  // of opening the camera. Skipped straight to fn() if no before photo is
-  // pinned in either category yet.
+  // of opening the camera. Skipped straight to fn() if no Side before photo
+  // is pinned yet.
   const triggerAction = (fn, mode='auto') => {
     if (beforeList.length) { pendingActionRef.current = fn || null; setFlashMode(mode); setFlashPhotos(beforeList); }
     else fn?.();
