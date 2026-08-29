@@ -97,7 +97,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // Bumped on every delivered build so a stale cached copy (very common with
 // "Add to Home Screen" / re-opened local files) is instantly identifiable —
 // visible in Settings and as a small footer on the home screen.
-const APP_BUILD = "2026.08.21-side-only-flash-1";
+const APP_BUILD = "2026.08.29-storage-dateguard-1";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -288,6 +288,37 @@ function pruneOldData() {
     keysToDelete.forEach(k => localStorage.removeItem(k));
   } catch(e) { console.warn("data prune failed:", e); }
 }
+/* pruneOldData() used to only ever run once — at the very top of this file,
+   on page load. A PWA that stays open for weeks (never fully reloaded) would
+   then never prune again after that first run, so photos kept piling up
+   past the intended 14/30-day windows until localStorage's ~5MB cap was hit
+   and every new meal started failing to save. Gating on a stamped date
+   instead of running unconditionally means it's cheap to call this often —
+   it actually re-prunes once per calendar day, whenever that call happens. */
+const maybePruneOldData = () => {
+  const today = fmtKey(new Date());
+  if (ls.get("jct:lastprune") === today) return;
+  pruneOldData();
+  ls.set("jct:lastprune", today);
+};
+/* Last-resort escape hatch for saveMealsWithFallback: strips photos from
+   EVERY stored day, not just ones already past the normal retention window.
+   Only reached if a save still fails after the normal per-photo fallbacks,
+   meaning localStorage is essentially full — this guarantees logging a new
+   meal always succeeds instead of leaving the user stuck deleting old
+   entries by hand. Calorie and ingredient data is never touched, only
+   thumbnails. */
+function emergencyPrunePhotos() {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith("jct:m:")) continue;
+      const meals = JSON.parse(localStorage.getItem(key) || "[]");
+      if (!meals.some(m => m.imageBase64)) continue;
+      localStorage.setItem(key, JSON.stringify(meals.map(m => ({...m, imageBase64: null}))));
+    }
+  } catch(e) { console.warn("emergency prune failed:", e); }
+}
 async function saveMealsWithFallback(dateKey, meals, rawImage) {
   if (saveMeals(dateKey, meals)) return true;
   if (rawImage?.base64) {
@@ -296,6 +327,11 @@ async function saveMealsWithFallback(dateKey, meals, rawImage) {
     if (saveMeals(dateKey, retry)) return true;
   }
   const stripped = meals.map((m,i) => i===meals.length-1 ? {...m, imageBase64:null} : m);
+  if (saveMeals(dateKey, stripped)) return true;
+  // Still failing — localStorage is essentially full even without this
+  // meal's own photo. Free space from every other stored day and try once
+  // more before giving up entirely.
+  emergencyPrunePhotos();
   return saveMeals(dateKey, stripped);
 }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
@@ -796,6 +832,26 @@ function FirstRunPhotoPrompt({onAddPhoto,onDismiss}) {
     </div>
   </div>;
 }
+/* Shown whenever Say It / Photo / Recent / Workout is tapped while the
+   viewed date isn't today — most often because the date arrows got bumped
+   by accident and the entry would otherwise land silently on the wrong
+   day. Forces an explicit choice: confirm logging to that other date, or
+   snap back to today first. */
+function DateGuardPrompt({date,onConfirm,onGoToToday,onCancel}) {
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end",zIndex:100}} onClick={onCancel}>
+    <div style={{width:"100%",background:C.surface,borderRadius:"20px 20px 0 0",padding:"28px 20px 40px",border:`1px solid ${C.border}`}} onClick={e=>e.stopPropagation()}>
+      <div style={{width:36,height:4,background:C.border,borderRadius:2,margin:"0 auto 20px"}}/>
+      <div style={{display:"flex",justifyContent:"center",marginBottom:14}}><span style={{fontSize:40}}>📅</span></div>
+      <p style={{fontSize:17,fontWeight:500,color:C.text,textAlign:"center",marginBottom:8}}>You're viewing {fmtDisplay(date)}</p>
+      <p style={{fontSize:13,fontWeight:300,color:C.sub,textAlign:"center",lineHeight:1.6,marginBottom:22}}>
+        This isn't today — double-check before logging here, in case the date got bumped by accident.
+      </p>
+      <button style={{width:"100%",background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"16px",marginBottom:10}} onClick={onConfirm}>Yes, log to {fmtDisplay(date)} →</button>
+      <button style={{width:"100%",background:"transparent",border:`1px solid ${C.border}`,color:C.text,fontSize:14,fontWeight:400,borderRadius:14,padding:"14px",marginBottom:10}} onClick={onGoToToday}>Go to today instead</button>
+      <button style={{width:"100%",background:"transparent",border:"none",color:C.dim,fontSize:13,fontWeight:400,padding:"6px"}} onClick={onCancel}>Cancel</button>
+    </div>
+  </div>;
+}
 function WorkoutModal({onAdd,onClose}) {
   const [cal,setCal]=useState("");
   const [label,setLabel]=useState(()=>ls.get("jct:lastlabel")||"");
@@ -941,8 +997,19 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
   const [flashPhotos,setFlashPhotos]=useState(null);
   const [flashMode,setFlashMode]=useState(null); // 'auto' (Say It) | 'manual' (Photo)
   const [showPhotoPrompt,setShowPhotoPrompt]=useState(false);
+  const [showDateGuard,setShowDateGuard]=useState(false);
   const pendingActionRef=useRef(null);
+  const pendingDateActionRef=useRef(null);
   const fileRef=useRef();
+  // Guards Say It / Photo / Recent / Workout against a date that got bumped
+  // by an accidental tap on the ← arrow — those land the new entry on the
+  // wrong day with no warning otherwise. Today's date skips the prompt
+  // entirely so normal logging is unaffected.
+  const withDateGuard = fn => {
+    if (isToday(date)) { fn(); return; }
+    pendingDateActionRef.current = fn;
+    setShowDateGuard(true);
+  };
   // Only the Side "before" photo flashes now — shown full size, single
   // image, rather than paired with Front — per request. If Side has no
   // photo pinned yet, the flash is skipped entirely (no fallback to Front).
@@ -1100,6 +1167,10 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
       <p style={{fontSize:9,fontWeight:300,color:C.dim,textAlign:"center",opacity:0.5,padding:"10px 0 0"}}>Build {APP_BUILD}</p>
     </div>
     {showWorkout&&<WorkoutModal onAdd={w=>{onAddWorkout(w);setShowWorkout(false);}} onClose={()=>setShowWorkout(false)}/>}
+    {showDateGuard&&<DateGuardPrompt date={date}
+      onConfirm={()=>{const fn=pendingDateActionRef.current;pendingDateActionRef.current=null;setShowDateGuard(false);fn&&fn();}}
+      onGoToToday={()=>{pendingDateActionRef.current=null;setShowDateGuard(false);setDate(new Date());}}
+      onCancel={()=>{pendingDateActionRef.current=null;setShowDateGuard(false);}}/>}
     {showPhotoPrompt&&<FirstRunPhotoPrompt
       onAddPhoto={()=>{markSeenPhotoPrompt();setShowPhotoPrompt(false);onOpenProgress();}}
       onDismiss={()=>{markSeenPhotoPrompt();setShowPhotoPrompt(false);}}/>}
@@ -1113,10 +1184,10 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
       padding:"10px 16px calc(env(safe-area-inset-bottom,12px) + 10px)",
       background:`linear-gradient(180deg, rgba(10,10,15,0) 0%, ${C.bg} 22%)`}}>
       <div style={{display:"flex",gap:8}}>
-        <ActionBtn onClick={()=>{ prewarmSpeech(); triggerAction(onOpenDescribe, 'auto'); }} tone="accent" icon={<IcMic/>} label="Say it"/>
-        <ActionBtn onClick={()=>triggerAction(()=>fileRef.current.click(), 'manual')} icon={<IcCamera/>} label="Photo"/>
-        <ActionBtn onClick={onOpenLibrary} icon={<IcStack/>} label="Recent"/>
-        <ActionBtn onClick={()=>setShowWorkout(true)} tone="orange" icon={<span style={{fontSize:22,lineHeight:"22px"}}>🔥</span>} label="Workout"/>
+        <ActionBtn onClick={()=>{ prewarmSpeech(); withDateGuard(()=>triggerAction(onOpenDescribe, 'auto')); }} tone="accent" icon={<IcMic/>} label="Say it"/>
+        <ActionBtn onClick={()=>withDateGuard(()=>triggerAction(()=>fileRef.current.click(), 'manual'))} icon={<IcCamera/>} label="Photo"/>
+        <ActionBtn onClick={()=>withDateGuard(onOpenLibrary)} icon={<IcStack/>} label="Recent"/>
+        <ActionBtn onClick={()=>withDateGuard(()=>setShowWorkout(true))} tone="orange" icon={<span style={{fontSize:22,lineHeight:"22px"}}>🔥</span>} label="Workout"/>
       </div>
     </div>
   </div>;
@@ -2149,6 +2220,7 @@ function App() {
   };
   // Saves the meal, then opens it so items can be added right away.
   const addMeal = async m => {
+    maybePruneOldData();
     recordItems(m.ingredients);
     const k=dateKeyRef.current;
     const raw = m.imageBase64 ? {base64:m.imageBase64, mimeType:m.imageMime||"image/jpeg"} : null;
@@ -2251,7 +2323,7 @@ function App() {
     {screen==="macroHistory"&&<NutrientHistoryScreen metric={macroMetric} goal={effectiveGoal} onBack={()=>setScreen("home")}/>}
   </div>;
 }
-pruneOldData();
+maybePruneOldData();
 if (window.__bootTimeout) clearTimeout(window.__bootTimeout);
 try {
   ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
