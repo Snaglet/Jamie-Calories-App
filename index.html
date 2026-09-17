@@ -93,7 +93,7 @@ button{font-family:'Inter',sans-serif;cursor:pointer}
   loadNext(0);
 </script>
 <script type="text/plain" id="app-source">const { useState, useEffect, useRef, useCallback } = React;
-const APP_BUILD = "2026.09.17-fix-photo-btn-collapse-1";
+const APP_BUILD = "2026.09.17-checkin-name-setting-1";
 const PHOTO_MAX_PX = 480;
 const PHOTO_QUALITY = 0.72;
 const PHOTO_RETENTION_DAYS = 14;
@@ -213,6 +213,10 @@ const loadKey = () => ls.get("jct:apikey") || "";
 const saveKey = k => ls.set("jct:apikey", k);
 const loadWeights = () => { try { return JSON.parse(ls.get("jct:weights") || "[]"); } catch { return []; } };
 const saveWeights = w => ls.set("jct:weights", JSON.stringify(w));
+const loadTargetWeight = () => { const v=parseFloat(ls.get("jct:targetweight")); return isNaN(v) ? null : v; };
+const saveTargetWeight = v => ls.set("jct:targetweight", String(v));
+const loadUserName = () => ls.get("jct:username") || "";
+const saveUserName = n => ls.set("jct:username", n.trim());
 const loadWorkoutLabels = () => { try { return JSON.parse(ls.get("jct:wlabels") || "[]"); } catch { return []; } };
 const saveWorkoutLabels = arr => ls.set("jct:wlabels", JSON.stringify(arr));
 const loadItems = () => { try { return JSON.parse(ls.get("jct:items") || "[]"); } catch { return []; } };
@@ -555,6 +559,83 @@ function collectWorkoutDays(n=30) {
   }
   return out;
 }
+/* Builds the once-a-day "how am I doing" check-in shown on Home. Looks at
+   weight trend vs target (if set), logging consistency over the last week,
+   and recent protein adherence, and picks the single most relevant thing to
+   say — never more than one short line. Falls back to a plain generic nudge
+   (rotated by day-of-year so it isn't identical every day) when there isn't
+   enough data yet for a specific callout, so there's still always something.
+   Uses the name from Settings when one's set (", Jamie") and reads fine
+   without it too, so the feature works before anyone's typed a name in. */
+function buildDailyInsight() {
+  const name = loadUserName();
+  const greet = name ? `, ${name}` : "";
+  const weights = loadWeights();
+  const target = loadTargetWeight();
+  const days = collectDays(7);
+  const priorDays = days.slice(0,-1); // last 6 completed days, oldest→yesterday (excludes today)
+  const latestW = weights.length ? weights[weights.length-1].value : null;
+  const weekAgo = (() => {
+    if (weights.length<2) return null;
+    const cutoff=new Date(); cutoff.setDate(cutoff.getDate()-7);
+    const key=fmtKey(cutoff);
+    const older=weights.filter(w=>w.date<=key);
+    return older.length ? older[older.length-1] : weights[0];
+  })();
+  const weekDelta = (latestW!=null && weekAgo) ? Math.round((latestW-weekAgo.value)*10)/10 : null;
+  const candidates = [];
+  if (target!=null && latestW!=null) {
+    const toGo = Math.round((latestW-target)*10)/10;
+    if (Math.abs(toGo) < 0.5) {
+      candidates.push({score:100, tone:"positive", text:`Right at your ${target} lb target${greet} — incredible.`});
+    } else if (toGo > 0) {
+      if (weekDelta!=null && weekDelta <= -0.5) {
+        candidates.push({score:96, tone:"positive", text:`Down ${Math.abs(weekDelta)} lbs this week, ${toGo} to go to ${target}. You're killing it${greet}!`});
+      } else if (weekDelta!=null && weekDelta >= 0.5) {
+        candidates.push({score:92, tone:"nudge", text:`Up ${weekDelta} lbs this week, ${toGo} to go to ${target}. Let's get back on track today.`});
+      } else {
+        candidates.push({score:55, tone:"positive", text:`${toGo} lbs to go to your ${target} lb target. Stay steady${greet}.`});
+      }
+    } else {
+      candidates.push({score:90, tone:"positive", text:`You're ${Math.abs(toGo)} lbs past your ${target} lb target — amazing progress!`});
+    }
+  } else if (weekDelta!=null) {
+    if (weekDelta <= -0.5) candidates.push({score:80, tone:"positive", text:`Down ${Math.abs(weekDelta)} lbs this week — great progress${greet}!`});
+    else if (weekDelta >= 0.5) candidates.push({score:70, tone:"nudge", text:`Up ${weekDelta} lbs this week. Let's refocus today.`});
+  }
+  const loggedPriorCount = priorDays.filter(d=>d.calories>0).length;
+  if (priorDays.length>=5 && loggedPriorCount===priorDays.length) {
+    candidates.push({score:65, tone:"positive", text:`Logged every day this week — that consistency is what gets results.`});
+  } else if (priorDays.length>=3 && loggedPriorCount===0) {
+    candidates.push({score:75, tone:"nudge", text:`Haven't seen a log in a few days. Let's pick it back up today.`});
+  }
+  const targets = macroTargets(loadBaseGoal());
+  const last3 = priorDays.slice(-3).filter(d=>d.calories>0);
+  if (last3.length>=2 && last3.every(d=>d.protein >= targets.protein*0.9)) {
+    candidates.push({score:60, tone:"positive", text:`Hit your protein target ${last3.length} days running. Nice work.`});
+  }
+  if (candidates.length) {
+    candidates.sort((a,b)=>b.score-a.score);
+    return candidates[0];
+  }
+  const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(),0,0)) / 86400000);
+  const GENERIC = [
+    `New day, new chance to hit your goals. You've got this${greet}!`,
+    "Let's make today count.",
+    "Small consistent choices add up — keep going.",
+    "Show up today. That's most of the battle."
+  ];
+  return {score:0, tone:"positive", text:GENERIC[dayOfYear % GENERIC.length]};
+}
+function DailyInsightModal({insight,onDismiss}) {
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:110,padding:24}} onClick={onDismiss}>
+    <div style={{width:"100%",maxWidth:320,background:C.surface,borderRadius:22,border:`1px solid ${insight.tone==="nudge"?C.oMid:C.aMid}`,padding:"28px 22px 22px",position:"relative",textAlign:"center"}} onClick={e=>e.stopPropagation()}>
+      <button style={{position:"absolute",top:12,right:12,width:28,height:28,borderRadius:"50%",background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,lineHeight:1,padding:0}} onClick={onDismiss}>✕</button>
+      <div style={{fontSize:34,marginBottom:12}}>{insight.tone==="nudge"?"💪":"🎉"}</div>
+      <p style={{fontSize:15,fontWeight:500,color:C.text,lineHeight:1.55}}>{insight.text}</p>
+    </div>
+  </div>;
+}
 function StickyHeader({left, title, right}) {
   return <div style={{
     position:"sticky", top:0, zIndex:30,
@@ -778,7 +859,15 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal}) {
   const [err,setErr]=useState("");
   const [macros,setMacros]=useState(()=>macroTargets(goal));
   const [ov,setOv]=useState(()=>loadMacroOverrides());
+  const [targetVal,setTargetVal]=useState(()=>{const t=loadTargetWeight();return t!=null?String(t):"";});
+  const [nameVal,setNameVal]=useState(()=>loadUserName());
   const masked = apiKey ? `${apiKey.slice(0,14)}...${apiKey.slice(-4)}` : null;
+  const commitName=()=>{saveUserName(nameVal);setNameVal(loadUserName());};
+  const commitTargetWeight=()=>{
+    const n=parseFloat(targetVal);
+    if(!isNaN(n)&&n>0){saveTargetWeight(n);setTargetVal(String(n));}
+    else{saveTargetWeight("");setTargetVal("");}
+  };
   const submit=()=>{
     const t=val.trim();
     if(!t){setErr("Enter an API key to continue");return;}
@@ -834,6 +923,27 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal}) {
             </div>
           </div>
         )}
+      </div>
+      <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
+        <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>Your name</p>
+        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:14}}>Used to personalize your daily check-in ("You're killing it, Jamie!"). Leave blank to skip it.</p>
+        <input type="text" placeholder="e.g. Jamie" value={nameVal}
+          onChange={e=>setNameVal(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={e=>e.key==="Enter"&&e.target.blur()}
+          style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:15,padding:"12px 14px",outline:"none",fontFamily:"'Inter',sans-serif"}}/>
+      </div>
+      <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
+        <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>Target weight</p>
+        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:14}}>Used for your daily check-in on the home screen. Leave blank to turn that off.</p>
+        <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+          <input type="number" inputMode="decimal" placeholder="e.g. 165" value={targetVal}
+            onChange={e=>setTargetVal(e.target.value)}
+            onBlur={commitTargetWeight}
+            onKeyDown={e=>e.key==="Enter"&&e.target.blur()}
+            style={{width:90,background:"transparent",border:"none",borderBottom:`1px solid ${C.border}`,color:C.text,fontSize:22,fontWeight:200,outline:"none",fontFamily:"'Inter',sans-serif"}}/>
+          <span style={{fontSize:12,color:C.dim}}>lbs</span>
+        </div>
       </div>
       <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
         <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:8}}>Photos & storage</p>
@@ -2058,6 +2168,15 @@ function App() {
   const [photoChecked,setPhotoChecked]=useState(false);
   const refreshBeforePhoto = () => { getPinnedBeforePhotos().then(p=>{ setBeforePhotos(p); setPhotoChecked(true); }); };
   useEffect(()=>{ refreshBeforePhoto(); },[]);
+  // Once-a-day "how am I doing" check-in, shown once per calendar day on
+  // launch (not re-shown on every screen change or app re-focus that day).
+  const [dailyInsight,setDailyInsight]=useState(null);
+  useEffect(()=>{
+    const today = fmtKey(new Date());
+    if (ls.get("jct:lastinsight")===today) return;
+    const insight = buildDailyInsight();
+    if (insight) { setDailyInsight(insight); ls.set("jct:lastinsight", today); }
+  },[]);
   const dateKeyRef=useRef(fmtKey(new Date()));
   const [,forceRender]=useState(0);
   const bump=()=>forceRender(n=>n+1);
@@ -2156,6 +2275,7 @@ function App() {
     {screen==="weightHistory"&&<WeightHistoryScreen onBack={()=>setScreen("home")}/>}
     {screen==="macroHistory"&&<NutrientHistoryScreen metric={macroMetric} goal={effectiveGoal} onBack={()=>setScreen("home")}/>}
     {screen==="workoutHistory"&&<WorkoutHistoryScreen onBack={()=>setScreen("home")}/>}
+    {dailyInsight&&screen==="home"&&<DailyInsightModal insight={dailyInsight} onDismiss={()=>setDailyInsight(null)}/>}
   </div>;
 }
 maybePruneOldData();
