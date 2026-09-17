@@ -92,9 +92,8 @@ button{font-family:'Inter',sans-serif;cursor:pointer}
   }
   loadNext(0);
 </script>
-<script type="text/plain" id="app-source">
-const { useState, useEffect, useRef, useCallback } = React;
-const APP_BUILD = "2026.09.11-upload-trends-clearbtn-1";
+<script type="text/plain" id="app-source">const { useState, useEffect, useRef, useCallback } = React;
+const APP_BUILD = "2026.09.17-fix-photo-btn-collapse-1";
 const PHOTO_MAX_PX = 480;
 const PHOTO_QUALITY = 0.72;
 const PHOTO_RETENTION_DAYS = 14;
@@ -216,8 +215,6 @@ const loadWeights = () => { try { return JSON.parse(ls.get("jct:weights") || "[]
 const saveWeights = w => ls.set("jct:weights", JSON.stringify(w));
 const loadWorkoutLabels = () => { try { return JSON.parse(ls.get("jct:wlabels") || "[]"); } catch { return []; } };
 const saveWorkoutLabels = arr => ls.set("jct:wlabels", JSON.stringify(arr));
-const loadLibrary = () => { try { return JSON.parse(ls.get("jct:lib") || "[]"); } catch { return []; } };
-const saveLibrary = arr => ls.set("jct:lib", JSON.stringify(arr));
 const loadItems = () => { try { return JSON.parse(ls.get("jct:items") || "[]"); } catch { return []; } };
 const saveItems = arr => ls.set("jct:items", JSON.stringify(arr));
 const MACRO_SPLIT = { protein:0.30, carbs:0.40, fat:0.30 };
@@ -386,7 +383,6 @@ async function analyze(apiKey, imageData, description, onRetry) {
   throw lastErr;
 }
 function itemSort(a,b) { return (b.uses||0)-(a.uses||0) || (b.lastUsed||0)-(a.lastUsed||0); }
-function recencySort(a,b) { return (b.lastUsed||0)-(a.lastUsed||0); }
 function recordItems(ingredients, countAsUse=true) {
   if (!ingredients?.length) return;
   const list = loadItems();
@@ -409,38 +405,10 @@ function recordItems(ingredients, countAsUse=true) {
   });
   saveItems(Object.values(map).sort(itemSort).slice(0,150));
 }
-function recordMealTemplate(meal) {
-  if (!meal || meal.type === "workout") return;
-  const title = (meal.mealTitle||"").trim();
-  if (!title || title.toLowerCase() === "new meal" || !(meal.totalCalories > 0)) return;
-  const lib = loadLibrary();
-  const key = title.toLowerCase();
-  const prior = lib.find(t => t.key === key);
-  const entry = {
-    key, mealTitle: title, emoji: meal.emoji || "🍽️",
-    totalCalories: meal.totalCalories,
-    totalProteinG: meal.totalProteinG || 0,
-    totalCarbsG: meal.totalCarbsG || 0,
-    totalFatG: meal.totalFatG || 0,
-    summary: meal.summary || "",
-    ingredients: (meal.ingredients||[]).map(i => ({
-      name: i.name, calories: i.calories,
-      proteinG: i.proteinG || 0, carbsG: i.carbsG || 0, fatG: i.fatG || 0,
-      baseCalories: i.baseCalories ?? i.calories,
-      baseProteinG: i.baseProteinG ?? (i.proteinG || 0),
-      baseCarbsG: i.baseCarbsG ?? (i.carbsG || 0),
-      baseFatG: i.baseFatG ?? (i.fatG || 0),
-      servings: i.servings ?? 1
-    })),
-    lastUsed: Date.now(),
-    uses: (prior?.uses || 0) + 1
-  };
-  saveLibrary([entry, ...lib.filter(t => t.key !== key)].sort(itemSort).slice(0, 80));
-}
 let _id = Date.now();
 const uid = () => `m${++_id}`;
 const C = {
-  bg:"#0A0A0F", surface:"#13131A", hover:"#1C1C28", card:"#16161F",
+  bg:"#0A0A0F", bg2:"#13131A", surface:"#13131A", hover:"#1C1C28", card:"#16161F",
   border:"rgba(255,255,255,0.10)",
   accent:"#4AE68A", aDim:"rgba(74,230,138,0.12)", aMid:"rgba(74,230,138,0.35)",
   text:"#F0F0F8", sub:"rgba(240,240,248,0.66)", dim:"rgba(240,240,248,0.50)",
@@ -592,7 +560,7 @@ function StickyHeader({left, title, right}) {
     position:"sticky", top:0, zIndex:30,
     display:"flex", alignItems:"center", justifyContent:"space-between",
     padding:"calc(env(safe-area-inset-top,44px) + 12px) 16px 12px",
-    background:C.bg, borderBottom:`1px solid ${C.border}`
+    background:C.bg2, borderBottom:`1px solid ${C.border}`
   }}>
     {left || <div style={{width:44}}/>}
     <span style={{fontSize:16,fontWeight:500,color:C.text}}>{title}</span>
@@ -629,9 +597,15 @@ function MacroMini({label,value,target,color,onOpen}) {
     </div>
   </div>;
 }
+/* Windowed by calendar time (6 months back), not by entry count — sparse
+   logging used to mean "last 30 entries" could stretch back much further
+   than 30 days without anyone intending that, which is confusing on a
+   widget that's meant to give an at-a-glance recent trend. */
 function WeightChart({data,height=84}) {
   if (!data.length) return null;
-  const pts = data.slice(-30);
+  const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-6);
+  const cutoffKey = fmtKey(cutoff);
+  const pts = data.filter(d=>d.date>=cutoffKey);
   if (pts.length < 2) return <p style={{fontSize:11,fontWeight:300,color:C.dim}}>Log another day to see the trend</p>;
   const W=320,H=84,PX=6,PY=10;
   const vals=pts.map(d=>d.value);
@@ -756,25 +730,6 @@ function DateGuardPrompt({date,onConfirm,onGoToToday,onCancel}) {
     </div>
   </div>;
 }
-/* Bottom sheet offered wherever a food photo can be added — lets the user
-   pick between the camera and their existing photo library, instead of the
-   file input jumping straight to the camera. Both onTakePhoto/onChooseLibrary
-   are expected to synchronously click a hidden <input type="file"> so the
-   picker opens within the same user gesture as this sheet's own button tap. */
-function PhotoSourceSheet({onClose,onTakePhoto,onChooseLibrary}) {
-  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end",zIndex:100}} onClick={onClose}>
-    <div style={{width:"100%",background:C.surface,borderRadius:"20px 20px 0 0",padding:"20px 20px 40px",border:`1px solid ${C.border}`}} onClick={e=>e.stopPropagation()}>
-      <div style={{width:36,height:4,background:C.border,borderRadius:2,margin:"0 auto 18px"}}/>
-      <button style={{width:"100%",display:"flex",alignItems:"center",gap:10,background:C.hover,border:`1px solid ${C.border}`,borderRadius:14,color:C.text,fontSize:15,fontWeight:500,padding:"15px 16px",marginBottom:10}} onClick={onTakePhoto}>
-        <span style={{color:C.accent,display:"flex"}}><IcCamera size={18}/></span> Take photo
-      </button>
-      <button style={{width:"100%",display:"flex",alignItems:"center",gap:10,background:C.hover,border:`1px solid ${C.border}`,borderRadius:14,color:C.text,fontSize:15,fontWeight:500,padding:"15px 16px",marginBottom:10}} onClick={onChooseLibrary}>
-        <span style={{fontSize:18,lineHeight:1}}>🖼️</span> Choose from library
-      </button>
-      <button style={{width:"100%",background:"transparent",border:"none",color:C.dim,fontSize:14,fontWeight:400,padding:"10px"}} onClick={onClose}>Cancel</button>
-    </div>
-  </div>;
-}
 function WorkoutModal({onAdd,onClose,onViewTrends}) {
   const [cal,setCal]=useState("");
   const [label,setLabel]=useState(()=>ls.get("jct:lastlabel")||"");
@@ -837,7 +792,7 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal}) {
     setOv(next); saveMacroOverrides(next); setMacros(macroTargets(goal));
   };
   const resetMacros=()=>{ setOv({}); saveMacroOverrides({}); setMacros(macroTargets(goal)); };
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
+  return <div style={{height:"100%",background:C.bg2,overflowY:"auto",paddingBottom:48}}>
     <StickyHeader left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>} title="Settings"/>
     <div style={{padding:"16px 16px 0",display:"flex",flexDirection:"column",gap:14}}>
       <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px 18px 16px"}}>
@@ -929,7 +884,6 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
   const [flashMode,setFlashMode]=useState(null); // 'auto' (Say It) | 'manual' (Photo)
   const [showPhotoPrompt,setShowPhotoPrompt]=useState(false);
   const [showDateGuard,setShowDateGuard]=useState(false);
-  const [showPhotoSheet,setShowPhotoSheet]=useState(false);
   const pendingActionRef=useRef(null);
   const pendingDateActionRef=useRef(null);
   const fileRef=useRef();
@@ -1087,10 +1041,6 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
     {showPhotoPrompt&&<FirstRunPhotoPrompt
       onAddPhoto={()=>{markSeenPhotoPrompt();setShowPhotoPrompt(false);onOpenProgress();}}
       onDismiss={()=>{markSeenPhotoPrompt();setShowPhotoPrompt(false);}}/>}
-    {showPhotoSheet&&<PhotoSourceSheet
-      onClose={()=>setShowPhotoSheet(false)}
-      onTakePhoto={()=>{setShowPhotoSheet(false);fileRef.current.click();}}
-      onChooseLibrary={()=>{setShowPhotoSheet(false);libraryFileRef.current.click();}}/>}
     {flashPhotos&&flashMode==='auto'&&<BeforeFlash photos={flashPhotos} onDone={()=>{const fn=pendingActionRef.current;pendingActionRef.current=null;setFlashPhotos(null);setFlashMode(null);fn&&fn();}}/>}
     {flashPhotos&&flashMode==='manual'&&<BeforeFlash photos={flashPhotos} actionLabel="Take food photo →"
       onAction={()=>{const fn=pendingActionRef.current;pendingActionRef.current=null;fn&&fn();}}
@@ -1102,7 +1052,11 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
       background:`linear-gradient(180deg, rgba(10,10,15,0) 0%, ${C.bg} 22%)`}}>
       <div style={{display:"flex",gap:8}}>
         <ActionBtn onClick={()=>{ prewarmSpeech(); withDateGuard(()=>triggerAction(onOpenDescribe, 'auto')); }} tone="accent" icon={<IcMic/>} label="Say it"/>
-        <ActionBtn onClick={()=>withDateGuard(()=>triggerAction(()=>setShowPhotoSheet(true), 'manual'))} icon={<IcCamera/>} label="Photo"/>
+        <div style={{position:"relative",flex:1,minWidth:0,display:"flex"}}>
+          <ActionBtn onClick={()=>withDateGuard(()=>triggerAction(()=>fileRef.current.click(), 'manual'))} icon={<IcCamera/>} label="Photo"/>
+          <button onClick={e=>{e.stopPropagation();withDateGuard(()=>triggerAction(()=>libraryFileRef.current.click(),'manual'));}} aria-label="Choose photo from library"
+            style={{position:"absolute",top:-6,right:-6,width:22,height:22,borderRadius:"50%",background:C.hover,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,lineHeight:1,padding:0}}>🖼️</button>
+        </div>
         <ActionBtn onClick={()=>withDateGuard(onOpenLibrary)} icon={<IcStack/>} label="Recent"/>
         <ActionBtn onClick={()=>withDateGuard(()=>setShowWorkout(true))} tone="orange" icon={<span style={{fontSize:22,lineHeight:"22px"}}>🔥</span>} label="Workout"/>
       </div>
@@ -1140,7 +1094,7 @@ function DescribeScreen({apiKey,onBack,onAdd}) {
     } catch(e) { setError(e.message||"Something went wrong — check Settings ⚙️"); setSubmitting(false); }
   };
   if (submitting) return <Spinner text={retryNote||"Building your meal..."}/>;
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:40}}>
+  return <div style={{height:"100%",background:C.bg2,overflowY:"auto",paddingBottom:40}}>
     <StickyHeader left={<HeaderBtn onClick={()=>{speech.stop();onBack();}}><IcBack/></HeaderBtn>} title="Say what you ate"/>
     <div style={{display:"flex",flexDirection:"column",gap:14,padding:"12px 20px 40px"}}>
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12,paddingTop:6}}>
@@ -1197,7 +1151,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
     }
   };
   if (submitting && !error) return <Spinner text={retryNote||"Analyzing with GPT-5.6 Sol..."}/>;
-  return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column"}}>
+  return <div style={{height:"100%",background:C.bg2,display:"flex",flexDirection:"column"}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 8px) 16px 8px",flexShrink:0}}>
       <button style={{width:40,height:40,borderRadius:11,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{speech.stop();onBack();}}><IcBack/></button>
       <span style={{fontSize:16,fontWeight:500,color:C.text}}>Add meal photo</span>
@@ -1333,7 +1287,7 @@ const normalise = ings => (ings||[]).map(raw => {
   ing.baseFatG     = ing.fatG;
   return ing;
 });
-function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
+function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey,addInFlightRef}) {
   const [ings,setIngs]=useState(()=>normalise(meal.ingredients));
   const [editTotal,setEditTotal]=useState(false);
   const [totalVal,setTotalVal]=useState(String(meal.totalCalories));
@@ -1351,7 +1305,6 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
   const [lightbox,setLightbox]=useState(false);
   const [recent,setRecent]=useState(()=>loadItems().sort(itemSort).slice(0,8));
   const [previewItem,setPreviewItem]=useState(null);
-  const [showItemPhotoSheet,setShowItemPhotoSheet]=useState(false);
   const isWorkout=meal.type==="workout";
   const photoRef=useRef();
   const photoLibraryRef=useRef();
@@ -1400,21 +1353,31 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     }
     setEditIdx(null); setEditField(null);
   };
+  // Builds the new ingredient list from whatever the CURRENT state is at the
+  // moment this update actually applies, not from whatever `ings` closure
+  // was captured when the (often async, multi-second) add started. Without
+  // this, two adds landing close together — e.g. a "Say item" analysis
+  // finishing while a quick tap on a "Recent" item lands first — would have
+  // the slower one overwrite the meal with a stale, pre-recent-item list,
+  // silently dropping whichever item resolved first.
   const appendIngredients = (raw, extra={}) => {
     const added = normalise(raw);
-    const next = [...ings, ...added];
     recordItems(added);
     setRecent(loadItems().sort(itemSort).slice(0,8));
-    setIngs(next);
-    save(next, extra);
+    setIngs(prev => {
+      const next = [...prev, ...added];
+      save(next, extra);
+      return next;
+    });
   };
   const addRecent = it => {
     appendIngredients([{name:it.name,calories:it.calories,proteinG:it.proteinG,carbsG:it.carbsG,fatG:it.fatG}]);
   };
   const addByText = async () => {
-    if (!addText.trim()) return;
+    if (!addText.trim() || addLoading) return;
     speech.stop();
     setAddLoading(true); setAddError("");
+    addInFlightRef.current = true;
     try {
       const r = await analyze(apiKey, null, addText, (n,max)=>setAddLoading(`Retrying (${n}/${max-1})...`));
       const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0}];
@@ -1423,13 +1386,15 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
       appendIngredients(raw, extra);
       setAddText(""); setAdding(false);
     } catch(e) { setAddError(e.message||"Couldn't add that — try again"); }
+    addInFlightRef.current = false;
     setAddLoading(false);
   };
   const addByPhoto = async file => {
     setBusyMsg("Analyzing item...");
+    addInFlightRef.current = true;
     try {
       const shot = await fileToImageData(file);
-      if (!shot) { setBusyMsg(""); setAddError("Couldn't read that photo"); return; }
+      if (!shot) { setBusyMsg(""); setAddError("Couldn't read that photo"); addInFlightRef.current = false; return; }
       const r = await analyze(apiKey, shot.imageData, null, (n,max)=>setBusyMsg(`Hit a snag — retrying (${n}/${max-1})...`));
       const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0}];
       const extra = {};
@@ -1440,6 +1405,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
       if (!meal.emoji || meal.mealTitle === "New meal") extra.emoji = r.emoji || meal.emoji;
       appendIngredients(raw, extra);
     } catch(e) { setAddError(e.message||"Couldn't analyze that photo"); }
+    addInFlightRef.current = false;
     setBusyMsg("");
   };
   const commitPendingEdit = () => {
@@ -1448,7 +1414,14 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     if (editIdx !== null) {
       if (editField === "serv") commitServ(editIdx);
       else if (editField === "cal") commitCal(editIdx);
+      return;
     }
+    // Everything else in this screen commits automatically on blur (title,
+    // totals, servings) — the "Say item" note box was the one exception,
+    // discarding whatever was typed the moment you tapped Back without
+    // remembering to tap "Add item →" first. Submit it instead, matching
+    // how the rest of the screen behaves.
+    if (adding && addText.trim() && !addLoading) { addByText(); }
   };
   if (busyMsg) return <Spinner text={busyMsg}/>;
   if (lightbox && meal.imageBase64) return <div
@@ -1459,7 +1432,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     <button style={{marginTop:22,background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:14,fontWeight:400,padding:"12px 28px"}}
       onClick={()=>setLightbox(false)}>Close</button>
   </div>;
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
+  return <div style={{height:"100%",background:C.bg2,overflowY:"auto",paddingBottom:48}}>
     <StickyHeader
       left={<HeaderBtn onClick={()=>{commitPendingEdit();onBack();}}><IcBack/></HeaderBtn>}
       title={isWorkout?"Workout":"Meal details"}
@@ -1524,9 +1497,13 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
         </div>}
         {ings.map((ing,idx)=><SwipeIngRow key={idx} ing={ing} idx={idx} editIdx={editIdx} editField={editField} servVal={servVal} calVal={calVal} setServVal={setServVal} setCalVal={setCalVal} setEditIdx={setEditIdx2} commitServ={commitServ} commitCal={commitCal} onDelete={i=>{const next=ings.filter((_,j)=>j!==i);setIngs(next);save(next);}}/>)}
         {!adding&&<div style={{display:"flex",gap:8,padding:"12px 14px",borderTop:`1px solid ${C.border}`}}>
-          <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:C.hover,border:`1px solid ${C.border}`,borderRadius:10,color:C.text,fontSize:12,fontWeight:400,padding:"11px"}} onClick={()=>setShowItemPhotoSheet(true)}>
-            <IcCamera size={15}/> Photo item
-          </button>
+          <div style={{position:"relative",flex:1}}>
+            <button style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:C.hover,border:`1px solid ${C.border}`,borderRadius:10,color:C.text,fontSize:12,fontWeight:400,padding:"11px"}} onClick={()=>photoRef.current.click()}>
+              <IcCamera size={15}/> Photo item
+            </button>
+            <button onClick={()=>photoLibraryRef.current.click()} aria-label="Choose photo from library"
+              style={{position:"absolute",top:-7,right:-7,width:22,height:22,borderRadius:"50%",background:C.surface,border:`1px solid ${C.border}`,color:C.sub,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,lineHeight:1,padding:0}}>🖼️</button>
+          </div>
           <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:10,color:C.accent,fontSize:12,fontWeight:400,padding:"11px"}} onClick={()=>{setAdding(true);setAddText("");setAddError("");baseRef.current="";setTimeout(()=>speech.start(),150);}}>
             <IcMic size={15}/> Say item
           </button>
@@ -1537,10 +1514,6 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
         <input ref={photoLibraryRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
           const f=e.target.files[0]; e.target.value=""; if(f) addByPhoto(f);
         }}/>
-        {showItemPhotoSheet&&<PhotoSourceSheet
-          onClose={()=>setShowItemPhotoSheet(false)}
-          onTakePhoto={()=>{setShowItemPhotoSheet(false);photoRef.current.click();}}
-          onChooseLibrary={()=>{setShowItemPhotoSheet(false);photoLibraryRef.current.click();}}/>}
         {adding&&<div style={{padding:"12px 14px",borderTop:`1px solid ${C.border}`}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
             <div onClick={speech.listening?speech.stop:startMic}
@@ -1606,55 +1579,35 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     </div>}
   </div>;
 }
-function LibraryScreen({onBack,onPreviewMeal,onPreviewItem}) {
-  const [tab,setTab]=useState("meals");
-  const [lib,setLib]=useState(()=>loadLibrary().sort(recencySort));
-  const [items,setItems]=useState(()=>loadItems().sort(recencySort));
+/* Ingredients only — the old "Meals" tab was dropped because meal templates
+   almost never populated in practice (recordMealTemplate's gating rarely
+   matched real usage), so it sat empty. Sorted most-selected first
+   (itemSort: uses desc, then lastUsed desc), same ordering the analyzer's
+   "recent items" quick-add uses on the meal-detail screen. */
+function LibraryScreen({onBack,onPreviewItem}) {
+  const [items,setItems]=useState(()=>loadItems().sort(itemSort));
   const [q,setQ]=useState("");
   const term = q.trim().toLowerCase();
-  const meals = term
-    ? lib.filter(t=>t.mealTitle.toLowerCase().includes(term) || t.ingredients.some(i=>i.name.toLowerCase().includes(term)))
-    : lib;
   const foods = term ? items.filter(t=>t.name.toLowerCase().includes(term)) : items;
-  const removeMeal = key => { const next=lib.filter(t=>t.key!==key); setLib(next); saveLibrary(next); };
   const removeItem = key => { const next=items.filter(t=>t.key!==key); setItems(next); saveItems(next); };
-  const Tab = ({id,label,count}) => <button
-    style={{flex:1,padding:"9px",borderRadius:10,border:"none",fontSize:13,fontWeight:400,
-      background: tab===id?C.aDim:"transparent", color: tab===id?C.accent:C.sub}}
-    onClick={()=>setTab(id)}>{label} <span style={{opacity:0.6,fontSize:11}}>{count}</span></button>;
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
+  return <div style={{height:"100%",background:C.bg2,overflowY:"auto",paddingBottom:48}}>
     <StickyHeader left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>} title="Recent"/>
-    <div style={{padding:"12px 16px 10px",position:"sticky",top:"calc(env(safe-area-inset-top,44px) + 68px)",background:C.bg,zIndex:20}}>
-      <div style={{display:"flex",gap:4,background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:4,marginBottom:10}}>
-        <Tab id="meals" label="Meals" count={lib.length}/>
-        <Tab id="items" label="Ingredients" count={items.length}/>
-      </div>
+    <div style={{padding:"12px 16px 10px",position:"sticky",top:"calc(env(safe-area-inset-top,44px) + 44px)",background:C.bg2,zIndex:20}}>
       <div style={{display:"flex",alignItems:"center",gap:9,background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 13px"}}>
         <span style={{color:C.dim,display:"flex"}}><IcSearch/></span>
-        <input value={q} onChange={e=>setQ(e.target.value)} placeholder={tab==="meals"?"Search meals":"Search ingredients"}
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search ingredients"
           style={{flex:1,background:"transparent",border:"none",color:C.text,fontSize:14,outline:"none",fontFamily:"'Inter',sans-serif"}}/>
         {q&&<button style={{background:"none",border:"none",color:C.dim,fontSize:13,padding:0}} onClick={()=>setQ("")}>Clear</button>}
       </div>
     </div>
     <div style={{padding:"4px 16px 0"}}>
-      {tab==="meals"&&<>
-        {lib.length===0&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"56px 24px",gap:10}}>
-          <span style={{fontSize:36}}>🗂️</span>
-          <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center",lineHeight:1.6}}>Meals you log show up here — tap one to view it, then add the whole thing or just the parts you want.</p>
-        </div>}
-        {lib.length>0&&meals.length===0&&<p style={{color:C.sub,fontSize:13,fontWeight:300,textAlign:"center",padding:"40px 0"}}>Nothing matches "{q}".</p>}
-        {meals.length>0&&<p style={{fontSize:11,fontWeight:300,color:C.dim,marginBottom:12}}>Most recent first · tap to view & add, swipe left to remove</p>}
-        {meals.map(t=><LibraryMealRow key={t.key} tpl={t} onPick={()=>onPreviewMeal(t)} onDelete={()=>removeMeal(t.key)}/>)}
-      </>}
-      {tab==="items"&&<>
-        {items.length===0&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"56px 24px",gap:10}}>
-          <span style={{fontSize:36}}>🥕</span>
-          <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center",lineHeight:1.6}}>Every ingredient you log lands here, most recent first.</p>
-        </div>}
-        {items.length>0&&foods.length===0&&<p style={{color:C.sub,fontSize:13,fontWeight:300,textAlign:"center",padding:"40px 0"}}>Nothing matches "{q}".</p>}
-        {foods.length>0&&<p style={{fontSize:11,fontWeight:300,color:C.dim,marginBottom:12}}>Most recent first · tap to view & add, swipe left to remove</p>}
-        {foods.map(t=><LibraryItemRow key={t.key} item={t} onPick={()=>onPreviewItem(t)} onDelete={()=>removeItem(t.key)}/>)}
-      </>}
+      {items.length===0&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"56px 24px",gap:10}}>
+        <span style={{fontSize:36}}>🥕</span>
+        <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center",lineHeight:1.6}}>Every ingredient you log lands here, most-selected first.</p>
+      </div>}
+      {items.length>0&&foods.length===0&&<p style={{color:C.sub,fontSize:13,fontWeight:300,textAlign:"center",padding:"40px 0"}}>Nothing matches "{q}".</p>}
+      {foods.length>0&&<p style={{fontSize:11,fontWeight:300,color:C.dim,marginBottom:12}}>Most-selected first · tap to view & add, swipe left to remove</p>}
+      {foods.map(t=><LibraryItemRow key={t.key} item={t} onPick={()=>onPreviewItem(t)} onDelete={()=>removeItem(t.key)}/>)}
     </div>
   </div>;
 }
@@ -1670,37 +1623,6 @@ function useSwipeDelete(onDelete, threshold=75) {
       onTouchEnd: ()=>{if(swipeX<=-threshold)onDelete();else{setSwipeX(0);setSwiping(false);}}
     }
   };
-}
-function LibraryMealRow({tpl,onPick,onDelete}) {
-  const {swipeX,swiping,handlers}=useSwipeDelete(onDelete);
-  return <div style={{position:"relative",marginBottom:9,borderRadius:15,overflow:"hidden"}}>
-    <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:18}}>
-      <span style={{color:"#fff",fontSize:12,fontWeight:400,marginRight:5}}>Remove</span><IcTrash/>
-    </div>
-    <div style={{display:"flex",alignItems:"center",gap:12,background:C.card,border:`1px solid ${C.border}`,borderRadius:15,padding:"12px 14px",cursor:"pointer",transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
-      onClick={()=>{if(swipeX===0)onPick();}} {...handlers}>
-      <div style={{width:44,height:44,borderRadius:11,background:C.hover,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-        <span style={{fontSize:20}}>{tpl.emoji}</span>
-      </div>
-      <div style={{flex:1,minWidth:0}}>
-        <p style={{fontSize:13,fontWeight:400,color:C.text,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tpl.mealTitle}</p>
-        <p style={{fontSize:11,fontWeight:300,color:C.dim}}>
-          {tpl.ingredients.length} {tpl.ingredients.length===1?"item":"items"} · {shortDate(tpl.lastUsed)}{tpl.uses>1?` · ${tpl.uses}×`:""}
-        </p>
-      </div>
-      <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:2,flexShrink:0}}>
-        <div style={{display:"flex",alignItems:"baseline",gap:3,padding:"5px 10px",background:C.aDim,borderRadius:10}}>
-          <span style={{fontSize:17,fontWeight:200,color:C.accent,letterSpacing:"-0.5px"}}>{tpl.totalCalories}</span>
-          <span style={{fontSize:9,fontWeight:300,color:C.aMid,textTransform:"uppercase"}}>cal</span>
-        </div>
-        <div style={{display:"flex",gap:5}}>
-          {(tpl.totalProteinG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.protein}}>{Math.round(tpl.totalProteinG)}p</span>}
-          {(tpl.totalCarbsG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.carbs}}>{Math.round(tpl.totalCarbsG)}c</span>}
-          {(tpl.totalFatG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.fat}}>{Math.round(tpl.totalFatG)}f</span>}
-        </div>
-      </div>
-    </div>
-  </div>;
 }
 function LibraryItemRow({item,onPick,onDelete}) {
   const {swipeX,swiping,handlers}=useSwipeDelete(onDelete);
@@ -1726,66 +1648,23 @@ function LibraryItemRow({item,onPick,onDelete}) {
     </div>
   </div>;
 }
-function LibraryPreviewScreen({tpl,kind,onBack,onAddWhole,onAddSelected,onAddItem}) {
-  const [checked,setChecked]=useState(()=> kind==="meal" ? tpl.ingredients.map(()=>true) : []);
-  if (kind==="item") {
-    return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
-      <StickyHeader left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>} title="Ingredient"/>
-      <div style={{padding:"18px 20px"}}>
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:18,padding:"22px 20px"}}>
-          <p style={{fontSize:18,fontWeight:400,color:C.text,marginBottom:12}}>{tpl.name}</p>
-          <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:16}}>
-            <span style={{fontSize:32,fontWeight:200,color:C.accent,letterSpacing:"-0.5px"}}>{tpl.calories}</span>
-            <span style={{fontSize:12,color:C.dim}}>cal</span>
-          </div>
-          <div style={{display:"flex",gap:14}}>
-            {(tpl.proteinG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.protein}}>{Math.round(tpl.proteinG)}g protein</span>}
-            {(tpl.carbsG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.carbs}}>{Math.round(tpl.carbsG)}g carbs</span>}
-            {(tpl.fatG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.fat}}>{Math.round(tpl.fatG)}g fat</span>}
-          </div>
-        </div>
-        <button style={{width:"100%",marginTop:16,background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"16px"}} onClick={()=>onAddItem(tpl)}>Add item →</button>
-      </div>
-    </div>;
-  }
-  const allChecked = checked.length>0 && checked.every(Boolean);
-  const anyChecked = checked.some(Boolean);
-  const selectedCount = checked.filter(Boolean).length;
-  const toggle = i => setChecked(c=>c.map((v,j)=>j===i?!v:v));
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:120}}>
-    <StickyHeader left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>} title="Meal preview"/>
+function ItemPreviewScreen({tpl,onBack,onAddItem}) {
+  return <div style={{height:"100%",background:C.bg2,overflowY:"auto",paddingBottom:48}}>
+    <StickyHeader left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>} title="Ingredient"/>
     <div style={{padding:"18px 20px"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
-        <div style={{width:52,height:52,borderRadius:14,background:C.hover,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><span style={{fontSize:24}}>{tpl.emoji}</span></div>
-        <div style={{minWidth:0}}>
-          <p style={{fontSize:17,fontWeight:400,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tpl.mealTitle}</p>
-          <p style={{fontSize:12,color:C.dim,marginTop:2}}>{tpl.totalCalories} cal · {tpl.ingredients.length} {tpl.ingredients.length===1?"item":"items"}</p>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:18,padding:"22px 20px"}}>
+        <p style={{fontSize:18,fontWeight:400,color:C.text,marginBottom:12}}>{tpl.name}</p>
+        <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:16}}>
+          <span style={{fontSize:32,fontWeight:200,color:C.accent,letterSpacing:"-0.5px"}}>{tpl.calories}</span>
+          <span style={{fontSize:12,color:C.dim}}>cal</span>
+        </div>
+        <div style={{display:"flex",gap:14}}>
+          {(tpl.proteinG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.protein}}>{Math.round(tpl.proteinG)}g protein</span>}
+          {(tpl.carbsG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.carbs}}>{Math.round(tpl.carbsG)}g carbs</span>}
+          {(tpl.fatG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.fat}}>{Math.round(tpl.fatG)}g fat</span>}
         </div>
       </div>
-      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,overflow:"hidden"}}>
-        <div style={{padding:"12px 16px 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <p style={{fontSize:11,fontWeight:400,color:C.sub,textTransform:"uppercase",letterSpacing:"1.2px"}}>Items</p>
-          <button style={{background:"none",border:"none",color:C.accent,fontSize:11,padding:0}} onClick={()=>setChecked(tpl.ingredients.map(()=>!allChecked))}>{allChecked?"Deselect all":"Select all"}</button>
-        </div>
-        {tpl.ingredients.map((ing,i)=>
-          <div key={i} onClick={()=>toggle(i)} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",borderTop:`1px solid ${C.border}`,cursor:"pointer"}}>
-            <div style={{width:18,height:18,borderRadius:5,border:`1.5px solid ${checked[i]?C.accent:C.border}`,background:checked[i]?C.accent:"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-              {checked[i]&&<span style={{color:C.bg,fontSize:11,fontWeight:700}}>✓</span>}
-            </div>
-            <div style={{flex:1,minWidth:0}}>
-              <p style={{fontSize:13,fontWeight:300,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ing.name}{ing.servings&&ing.servings!==1?` ×${ing.servings}`:""}</p>
-            </div>
-            <span style={{fontSize:13,fontWeight:300,color:C.accent,flexShrink:0}}>{ing.calories}</span>
-          </div>
-        )}
-      </div>
-      <p style={{fontSize:11,fontWeight:300,color:C.dim,marginTop:12,lineHeight:1.6}}>Add the whole meal at once, or check off just the items you want and add those instead.</p>
-    </div>
-    <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:50,padding:"10px 16px calc(env(safe-area-inset-bottom,12px) + 10px)",background:`linear-gradient(180deg, rgba(10,10,15,0) 0%, ${C.bg} 22%)`,display:"flex",flexDirection:"column",gap:8}}>
-      <button style={{width:"100%",background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"15px"}} onClick={()=>onAddWhole(tpl)}>Add whole meal →</button>
-      <button style={{width:"100%",background:"transparent",border:`1px solid ${C.aMid}`,borderRadius:14,color:C.accent,fontSize:14,fontWeight:500,padding:"13px",opacity:anyChecked?1:0.35}} disabled={!anyChecked} onClick={()=>onAddSelected(tpl, tpl.ingredients.filter((_,i)=>checked[i]))}>
-        Add {selectedCount||""} selected item{selectedCount===1?"":"s"} →
-      </button>
+      <button style={{width:"100%",marginTop:16,background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"16px"}} onClick={()=>onAddItem(tpl)}>Add item →</button>
     </div>
   </div>;
 }
@@ -1908,7 +1787,7 @@ function ProgressScreen({onBack}) {
       </div>
     </div>;
   };
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
+  return <div style={{height:"100%",background:C.bg2,overflowY:"auto",paddingBottom:48}}>
     <StickyHeader
       left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>}
       title="Progress photos"
@@ -1964,7 +1843,22 @@ function NutrientHistoryScreen({metric,goal,onBack}) {
     fat:    {label:"Fat",     color:C.fat}
   };
   const meta = META[metric] || META.protein;
+  const [,bumpTarget]=useState(0);
   const target = macroTargets(goal)[metric] || 0;
+  const [editingTarget,setEditingTarget]=useState(false);
+  const [targetVal,setTargetVal]=useState(String(target));
+  // Pins this macro's target to a fixed gram value, same override Settings'
+  // "Macro targets" section writes — edited here too since this is where
+  // you're actually looking at how you're tracking against it.
+  const commitTarget = () => {
+    const n = parseInt(targetVal);
+    const ov = loadMacroOverrides();
+    const next = {...ov};
+    if (!isNaN(n) && n>0) next[metric]=n; else delete next[metric];
+    saveMacroOverrides(next);
+    setEditingTarget(false);
+    bumpTarget(n=>n+1);
+  };
   const days = useRef(collectDays(30)).current;
   const logged = days.filter(d=>d.calories>0);
   const avg = logged.length ? Math.round(logged.reduce((s,d)=>s+d[metric],0)/logged.length) : 0;
@@ -1972,16 +1866,27 @@ function NutrientHistoryScreen({metric,goal,onBack}) {
   const peak = Math.max(target, ...days.map(d=>d[metric]), 1);
   const targetY = (target/peak)*100;
   const fmtDay = k => new Date(k+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
+  return <div style={{height:"100%",background:C.bg2,overflowY:"auto",paddingBottom:48}}>
     <StickyHeader left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>} title={`${meta.label} history`}/>
     <div style={{padding:"16px 16px 0"}}>
       <div style={{display:"flex",gap:10,marginBottom:16}}>
-        {[["Average",`${avg}g`],["Target",`${target}g`],["Days hit",`${hits}/${logged.length||0}`]].map(([l,v])=>
-          <div key={l} style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"12px 10px",display:"flex",flexDirection:"column",alignItems:"center"}}>
-            <span style={{fontSize:17,fontWeight:200,color:meta.color,letterSpacing:"-0.5px"}}>{v}</span>
-            <span style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:3}}>{l}</span>
-          </div>
-        )}
+        <div style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"12px 10px",display:"flex",flexDirection:"column",alignItems:"center"}}>
+          <span style={{fontSize:17,fontWeight:200,color:meta.color,letterSpacing:"-0.5px"}}>{avg}g</span>
+          <span style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:3}}>Average</span>
+        </div>
+        <div style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"12px 10px",display:"flex",flexDirection:"column",alignItems:"center",cursor:"pointer"}}
+          onClick={()=>{setTargetVal(String(target));setEditingTarget(true);}}>
+          {editingTarget
+            ? <input autoFocus type="number" inputMode="numeric" style={{width:52,background:"transparent",border:"none",borderBottom:`2px solid ${meta.color}`,color:meta.color,fontSize:17,fontWeight:200,textAlign:"center",outline:"none",fontFamily:"'Inter',sans-serif"}}
+                value={targetVal} onChange={e=>setTargetVal(e.target.value)} onClick={e=>e.stopPropagation()}
+                onBlur={commitTarget} onKeyDown={e=>e.key==="Enter"&&commitTarget()}/>
+            : <span style={{fontSize:17,fontWeight:200,color:meta.color,letterSpacing:"-0.5px"}}>{target}g</span>}
+          <span style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:3,display:"flex",alignItems:"center",gap:3}}>Target {!editingTarget&&<IcEdit size={9}/>}</span>
+        </div>
+        <div style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"12px 10px",display:"flex",flexDirection:"column",alignItems:"center"}}>
+          <span style={{fontSize:17,fontWeight:200,color:meta.color,letterSpacing:"-0.5px"}}>{hits}/{logged.length||0}</span>
+          <span style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:3}}>Days hit</span>
+        </div>
       </div>
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:"16px 16px 12px",marginBottom:16}}>
         <p style={{fontSize:10,fontWeight:400,color:C.sub,textTransform:"uppercase",letterSpacing:"1px",marginBottom:14}}>Last 30 days</p>
@@ -2038,7 +1943,7 @@ function WorkoutHistoryScreen({onBack}) {
   const avg = active.length ? Math.round(total/active.length) : 0;
   const peak = Math.max(...days.map(d=>d.burned), 1);
   const fmtDay = k => new Date(k+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
+  return <div style={{height:"100%",background:C.bg2,overflowY:"auto",paddingBottom:48}}>
     <StickyHeader left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>} title="Exercise trends"/>
     <div style={{padding:"16px 16px 0"}}>
       <div style={{display:"flex",gap:10,marginBottom:16}}>
@@ -2084,55 +1989,60 @@ function WorkoutHistoryScreen({onBack}) {
     </div>
   </div>;
 }
+/* Read-only trend view — same 6-month window and bar-chart shape as the
+   macro and workout history screens, rather than an editable list. Weight
+   is still edited from the Home screen (tap the number there); this screen
+   is purely for looking at the trend. */
 function WeightHistoryScreen({onBack}) {
-  const [log,setLog]=useState(()=>{
-    const all=loadWeights();
-    const cutoff=new Date();cutoff.setDate(cutoff.getDate()-30);
-    return all.filter(w=>w.date>=fmtKey(cutoff)).sort((a,b)=>b.date.localeCompare(a.date));
-  });
-  const [editDate,setEditDate]=useState(null);
-  const [editVal,setEditVal]=useState("");
-  const saveAll = next => { setLog(next); saveWeights([...loadWeights().filter(w=>!next.find(n=>n.date===w.date)), ...next].sort((a,b)=>a.date.localeCompare(b.date))); };
-  const commitEdit = date => {
-    const n=parseFloat(editVal);
-    if(!isNaN(n)&&n>0) saveAll(log.map(w=>w.date===date?{...w,value:n}:w));
-    setEditDate(null);
-  };
-  const deleteEntry = date => {
-    setLog(log.filter(w=>w.date!==date));
-    saveWeights(loadWeights().filter(w=>w.date!==date));
-  };
-  const fmt = dateStr => new Date(dateStr+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
-  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
+  const all = useRef(loadWeights()).current;
+  const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-6);
+  const cutoffKey = fmtKey(cutoff);
+  const log = all.filter(w=>w.date>=cutoffKey).sort((a,b)=>a.date.localeCompare(b.date));
+  const first = log[0]?.value, last = log[log.length-1]?.value;
+  const change = (first!=null && last!=null) ? Math.round((last-first)*10)/10 : null;
+  const peak = log.length ? Math.max(...log.map(w=>w.value)) : 1;
+  const floor = log.length ? Math.min(...log.map(w=>w.value)) : 0;
+  const range = (peak-floor) || 1;
+  const fmtDay = k => new Date(k+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+  return <div style={{height:"100%",background:C.bg2,overflowY:"auto",paddingBottom:48}}>
     <StickyHeader left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>} title="Weight history"/>
     <div style={{padding:"16px 16px 0"}}>
-      <p style={{fontSize:12,fontWeight:300,color:C.dim,marginBottom:16}}>Last 30 days — swipe left to delete</p>
-      {log.length===0&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"48px 0",gap:10}}>
-        <span style={{fontSize:36}}>⚖️</span>
-        <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center"}}>No weight entries yet.</p>
-      </div>}
-      {log.map(w=><WeightRow key={w.date} entry={w} isEditing={editDate===w.date} editVal={editVal} setEditVal={setEditVal} onTapEdit={()=>{setEditDate(w.date);setEditVal(String(w.value));}} onCommit={()=>commitEdit(w.date)} onDelete={()=>deleteEntry(w.date)} fmt={fmt}/>)}
-    </div>
-  </div>;
-}
-function WeightRow({entry,isEditing,editVal,setEditVal,onTapEdit,onCommit,onDelete,fmt}) {
-  const {swipeX,swiping,handlers}=useSwipeDelete(onDelete,70);
-  return <div style={{position:"relative",marginBottom:8,borderRadius:14,overflow:"hidden"}}>
-    <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:18}}>
-      <span style={{color:"#fff",fontSize:12,fontWeight:400,marginRight:4}}>Delete</span><IcTrash/>
-    </div>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
-      {...handlers}>
-      <span style={{fontSize:13,fontWeight:300,color:C.sub}}>{fmt(entry.date)}</span>
-      <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-        {isEditing
-          ?<input autoFocus type="number" inputMode="decimal" style={{width:70,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:18,fontWeight:200,fontFamily:"'Inter',sans-serif",textAlign:"right",outline:"none",letterSpacing:"-0.5px"}} value={editVal} onChange={e=>setEditVal(e.target.value)} onBlur={onCommit} onKeyDown={e=>e.key==="Enter"&&onCommit()}/>
-          :<span style={{fontSize:18,fontWeight:200,color:C.text,letterSpacing:"-0.5px",cursor:"pointer"}} onClick={onTapEdit}>{entry.value}</span>
-        }
-        <span style={{fontSize:11,fontWeight:300,color:C.dim}}>lbs</span>
-        {isEditing&&<button style={{width:24,height:24,borderRadius:"50%",background:C.accent,border:"none",color:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0}} onClick={onCommit}>✓</button>}
-        {!isEditing&&<span style={{color:C.dim,cursor:"pointer",display:"inline-flex",alignItems:"center"}} onClick={onTapEdit}><IcEdit/></span>}
-      </div>
+      {log.length===0
+        ? <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"48px 0",gap:10}}>
+            <span style={{fontSize:36}}>⚖️</span>
+            <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center"}}>No weight entries in the last 6 months.</p>
+          </div>
+        : <>
+          <div style={{display:"flex",gap:10,marginBottom:16}}>
+            {[["Starting",`${first}`],["Current",`${last}`],["Change",`${change>0?"+":""}${change}`]].map(([l,v])=>
+              <div key={l} style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"12px 10px",display:"flex",flexDirection:"column",alignItems:"center"}}>
+                <span style={{fontSize:17,fontWeight:200,color:l==="Change"?(change<0?C.accent:change>0?C.orange:C.text):C.text,letterSpacing:"-0.5px"}}>{v}</span>
+                <span style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:3}}>{l}</span>
+              </div>
+            )}
+          </div>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:"16px 16px 12px",marginBottom:16}}>
+            <p style={{fontSize:10,fontWeight:400,color:C.sub,textTransform:"uppercase",letterSpacing:"1px",marginBottom:14}}>Last 6 months</p>
+            <div style={{display:"flex",alignItems:"flex-end",gap:2,height:120,marginBottom:8}}>
+              {log.map(d=>{
+                const h=Math.max(6,((d.value-floor)/range)*100);
+                return <div key={d.date} style={{flex:1,minWidth:0,height:`${h}%`,background:C.accent,borderRadius:"2px 2px 0 0"}}/>;
+              })}
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <span style={{fontSize:9,fontWeight:300,color:C.dim}}>{fmtDay(log[0].date)}</span>
+              <span style={{fontSize:9,fontWeight:300,color:C.dim}}>Today</span>
+            </div>
+          </div>
+          <p style={{fontSize:11,fontWeight:300,color:C.dim,marginBottom:10}}>Logged days</p>
+          {[...log].reverse().map(w=>
+            <div key={w.date} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:"12px 15px",marginBottom:7}}>
+              <span style={{fontSize:13,fontWeight:300,color:C.text}}>{fmtDay(w.date)}</span>
+              <span style={{fontSize:16,fontWeight:200,color:C.text,letterSpacing:"-0.5px"}}>{w.value} <span style={{fontSize:10,fontWeight:300,color:C.dim}}>lbs</span></span>
+            </div>
+          )}
+        </>
+      }
     </div>
   </div>;
 }
@@ -2171,7 +2081,6 @@ function App() {
       storable = {...m, imageBase64: thumb || null};
     }
     await saveMealsWithFallback(k, [...loadMeals(k), storable], raw);
-    recordMealTemplate(storable);
     setSelected(storable); setScreen("detail"); bump();
   };
   const addWorkout=w=>{const k=dateKeyRef.current;saveMeals(k,[...loadMeals(k),w]);bump();};
@@ -2182,23 +2091,6 @@ function App() {
     bump();
   };
   const deleteMeal=id=>{const k=dateKeyRef.current;saveMeals(k,loadMeals(k).filter(x=>x.id!==id));setScreen("home");bump();};
-  const addFromLibrary = (tpl, ingredientsSubset) => {
-    const k=dateKeyRef.current;
-    const chosen = (ingredientsSubset || tpl.ingredients).map(i=>({...i}));
-    const totalCalories = chosen.reduce((s,x)=>s+(x.calories||0),0);
-    const totalProteinG = chosen.reduce((s,x)=>s+(x.proteinG||0),0);
-    const totalCarbsG   = chosen.reduce((s,x)=>s+(x.carbsG||0),0);
-    const totalFatG     = chosen.reduce((s,x)=>s+(x.fatG||0),0);
-    const m={
-      id:uid(), mealTitle:tpl.mealTitle, emoji:tpl.emoji,
-      summary: ingredientsSubset ? "" : tpl.summary,
-      totalCalories, totalProteinG, totalCarbsG, totalFatG,
-      ingredients:chosen, imageBase64:null, ...nowStamp()
-    };
-    saveMeals(k,[...loadMeals(k),m]);
-    recordMealTemplate(m); recordItems(m.ingredients);
-    setSelected(m); setScreen("detail"); bump();
-  };
   const addItemAsMeal = it => {
     const k=dateKeyRef.current;
     const ing={name:it.name,calories:it.calories,proteinG:it.proteinG||0,carbsG:it.carbsG||0,fatG:it.fatG||0,
@@ -2213,13 +2105,18 @@ function App() {
     recordItems([ing]);
     setSelected(m); setScreen("detail"); bump();
   };
+  // Guards against a real data-loss bug: if the user backs out of a meal
+  // while a "Say item"/"Photo item" add is still analyzing, the meal could
+  // look empty for a moment (its content hasn't landed yet) and get swept up
+  // by the empty-meal cleanup below — deleting the very meal the in-flight
+  // add is about to save into, so the item vanishes silently once the API
+  // call finally resolves. Skip the cleanup entirely while an add is pending.
+  const addInFlightRef = useRef(false);
   const leaveDetail = () => {
     const k=dateKeyRef.current;
     const cur=loadMeals(k).find(x=>x.id===selected?.id);
-    if (cur && cur.type!=="workout" && !(cur.ingredients||[]).length && !cur.totalCalories) {
+    if (cur && cur.type!=="workout" && !(cur.ingredients||[]).length && !cur.totalCalories && !addInFlightRef.current) {
       saveMeals(k, loadMeals(k).filter(x=>x.id!==cur.id));
-    } else if (cur) {
-      recordMealTemplate(cur);
     }
     setScreen("home"); bump();
   };
@@ -2249,15 +2146,12 @@ function App() {
     {screen==="camera"&&<PhotoScreen apiKey={apiKey} imageData={camImg.imageData} imagePreview={camImg.preview} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
     {screen==="describe"&&<DescribeScreen apiKey={apiKey} onBack={()=>setScreen("home")} onAdd={addMeal}/>}
     {screen==="library"&&<LibraryScreen onBack={()=>setScreen("home")}
-      onPreviewMeal={t=>{setPreview({kind:"meal",tpl:t});setScreen("libraryPreview");}}
-      onPreviewItem={t=>{setPreview({kind:"item",tpl:t});setScreen("libraryPreview");}}/>}
-    {screen==="libraryPreview"&&preview&&<LibraryPreviewScreen tpl={preview.tpl} kind={preview.kind}
+      onPreviewItem={t=>{setPreview(t);setScreen("itemPreview");}}/>}
+    {screen==="itemPreview"&&preview&&<ItemPreviewScreen tpl={preview}
       onBack={()=>setScreen("library")}
-      onAddWhole={tpl=>addFromLibrary(tpl)}
-      onAddSelected={(tpl,ings)=>addFromLibrary(tpl,ings)}
       onAddItem={addItemAsMeal}/>}
     {screen==="progress"&&<ProgressScreen onBack={()=>{setScreen("home");refreshBeforePhoto();}}/>}
-    {screen==="detail"&&selected&&<DetailScreen meal={selected} onBack={leaveDetail} onUpdate={updateMeal} onDelete={deleteMeal} apiKey={apiKey}/>}
+    {screen==="detail"&&selected&&<DetailScreen meal={selected} onBack={leaveDetail} onUpdate={updateMeal} onDelete={deleteMeal} apiKey={apiKey} addInFlightRef={addInFlightRef}/>}
     {screen==="settings"&&<SettingsScreen apiKey={apiKey} onSave={saveApiKey} onClear={clearApiKey} onBack={()=>setScreen("home")} goal={effectiveGoal}/>}
     {screen==="weightHistory"&&<WeightHistoryScreen onBack={()=>setScreen("home")}/>}
     {screen==="macroHistory"&&<NutrientHistoryScreen metric={macroMetric} goal={effectiveGoal} onBack={()=>setScreen("home")}/>}
@@ -2277,7 +2171,6 @@ try {
     '<button onclick="location.reload()" style="margin-top:16px;background:#4AE68A;border:none;border-radius:10px;color:#0A0A0F;font-size:14px;font-weight:600;padding:12px 24px;">Reload</button>' +
     '</div>';
 }
-
 </script>
 </body>
 </html>
