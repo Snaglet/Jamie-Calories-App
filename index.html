@@ -389,11 +389,12 @@ QUANTITIES — IMPORTANT:
 ACCURACY RULES:
 - Never return 0 calories for any real food item.
 - totalCalories MUST equal the sum of (calories × servings) across all ingredients.
-- Estimate proteinG, carbsG and fatG for EVERY ingredient, and the totals.
+- Estimate proteinG, carbsG, fatG and satFatG for EVERY ingredient, and the totals.
 - Macros should be roughly consistent with calories (protein 4 cal/g, carbs 4 cal/g, fat 9 cal/g).
+- satFatG (saturated fat) must be less than or equal to fatG for that same ingredient.
 - For emoji: pick ONE emoji that best represents the main food item.
 - Return ONLY raw JSON. No markdown fences, no explanation text, nothing else.`;
-  const shape = `{"mealTitle":"...","totalCalories":0,"totalProteinG":0,"totalCarbsG":0,"totalFatG":0,"emoji":"🍔","ingredients":[{"name":"...","servings":1,"calories":0,"proteinG":0,"carbsG":0,"fatG":0}],"summary":"..."}`;
+  const shape = `{"mealTitle":"...","totalCalories":0,"totalProteinG":0,"totalCarbsG":0,"totalFatG":0,"totalSatFatG":0,"emoji":"🍔","ingredients":[{"name":"...","servings":1,"calories":0,"proteinG":0,"carbsG":0,"fatG":0,"satFatG":0}],"summary":"..."}`;
   const userPrompt = imageData
     ? `Analyze this image carefully.${description ? ` User added: "${description}".` : ""} If you see a barcode or package, identify the exact product and use its real nutrition facts. Return this exact JSON: ${shape}`
     : `The user described their meal: "${description}". Use real brand/USDA data and multiply by any stated quantity. Return this exact JSON: ${shape}`;
@@ -497,6 +498,7 @@ function recordItems(ingredients, countAsUse=true) {
       proteinG: f.baseProteinG ?? f.proteinG ?? 0,
       carbsG:   f.baseCarbsG   ?? f.carbsG   ?? 0,
       fatG:     f.baseFatG     ?? f.fatG     ?? 0,
+      satFatG:  f.baseSatFatG  ?? f.satFatG  ?? 0,
       uses: (prior?.uses || 0) + (countAsUse ? 1 : 0),
       lastUsed: Date.now()
     };
@@ -516,14 +518,16 @@ function recordMealTemplate(meal) {
     totalProteinG: meal.totalProteinG || 0,
     totalCarbsG: meal.totalCarbsG || 0,
     totalFatG: meal.totalFatG || 0,
+    totalSatFatG: meal.totalSatFatG || 0,
     summary: meal.summary || "",
     ingredients: (meal.ingredients||[]).map(i => ({
       name: i.name, calories: i.calories,
-      proteinG: i.proteinG || 0, carbsG: i.carbsG || 0, fatG: i.fatG || 0,
+      proteinG: i.proteinG || 0, carbsG: i.carbsG || 0, fatG: i.fatG || 0, satFatG: i.satFatG || 0,
       baseCalories: i.baseCalories ?? i.calories,
       baseProteinG: i.baseProteinG ?? (i.proteinG || 0),
       baseCarbsG: i.baseCarbsG ?? (i.carbsG || 0),
       baseFatG: i.baseFatG ?? (i.fatG || 0),
+      baseSatFatG: i.baseSatFatG ?? (i.satFatG || 0),
       servings: i.servings ?? 1
     })),
     lastUsed: Date.now(),
@@ -541,7 +545,7 @@ const C = {
   track:"rgba(240,240,248,0.16)",
   red:"#FF4444", rDim:"rgba(255,68,68,0.14)", rMid:"rgba(255,68,68,0.35)",
   orange:"#FF9500", oDim:"rgba(255,149,0,0.14)", oMid:"rgba(255,149,0,0.35)",
-  protein:"#60C8F5", carbs:"#C88CF5", fat:"#F5C860"
+  protein:"#60C8F5", carbs:"#C88CF5", fat:"#F5C860", satfat:"#F57A60"
 };
 const IcCamera = ({size=22}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>;
 const IcMic = ({size=22}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>;
@@ -555,6 +559,7 @@ const IcRight = () => <svg width="17" height="17" viewBox="0 0 24 24" fill="none
 const IcEdit = ({size=13}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>;
 const IcBack = () => <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
 const IcTrash = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>;
+const IcX = ({size=14}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
 const IcGear = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>;
 /* ─── Speech ────────────────────────────────────────────────────────────────
    ONE SpeechRecognition instance for the whole app. Building a new one on every
@@ -802,6 +807,7 @@ function MealCard({meal,onTap,onDelete}) {
           {(meal.totalProteinG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.protein}}>{Math.round(meal.totalProteinG)}p</span>}
           {(meal.totalCarbsG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.carbs}}>{Math.round(meal.totalCarbsG)}c</span>}
           {(meal.totalFatG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.fat}}>{Math.round(meal.totalFatG)}f</span>}
+          {(meal.totalSatFatG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.satfat}}>{Math.round(meal.totalSatFatG)}s</span>}
         </div>}
       </div>
     </div>
@@ -890,8 +896,21 @@ function WorkoutModal({onAdd,onClose}) {
   const [showSugg,setShowSugg]=useState(false);
   const [allLabels]=useState(()=>loadWorkoutLabels());
   const calRef=useRef();
+  const labelRef=useRef();
   useEffect(()=>{setTimeout(()=>calRef.current?.focus(),100);},[]);
-  const handleLabelChange=v=>{setLabel(v);if(v.trim()){const m=allLabels.filter(l=>l.toLowerCase().includes(v.toLowerCase())&&l.toLowerCase()!==v.toLowerCase());setSuggestions(m);setShowSugg(m.length>0);}else setShowSugg(false);};
+  // Empty field shows every saved activity (so you can just pick one), typing
+  // narrows that down to matches. Re-used on focus too, so tapping into an
+  // already-empty field also brings the list up without needing to type first.
+  const handleLabelChange=v=>{
+    setLabel(v);
+    if(v.trim()){
+      const m=allLabels.filter(l=>l.toLowerCase().includes(v.toLowerCase())&&l.toLowerCase()!==v.toLowerCase());
+      setSuggestions(m);setShowSugg(m.length>0);
+    } else {
+      setSuggestions(allLabels);setShowSugg(allLabels.length>0);
+    }
+  };
+  const clearLabel=()=>{handleLabelChange("");labelRef.current?.focus();};
   const submit=()=>{
     const n=parseInt(cal);if(isNaN(n)||n<=0)return;
     const fl=label.trim()||"Workout";ls.set("jct:lastlabel",fl);
@@ -905,9 +924,14 @@ function WorkoutModal({onAdd,onClose}) {
       <p style={{fontSize:17,fontWeight:500,color:C.text,marginBottom:4}}>Log workout</p>
       <p style={{fontSize:12,fontWeight:300,color:C.sub,marginBottom:20}}>Calories burned raise today's goal</p>
       <div style={{position:"relative",marginBottom:12}}>
-        <input type="text" placeholder="Activity (e.g. OrangeTheory, Walking...)" value={label} onChange={e=>handleLabelChange(e.target.value)} onBlur={()=>setTimeout(()=>setShowSugg(false),150)}
-          style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:15,padding:"12px 16px",outline:"none",fontFamily:"'Inter',sans-serif"}}/>
-        {showSugg&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",zIndex:10,marginTop:4}}>
+        <input ref={labelRef} type="text" placeholder="Activity (e.g. OrangeTheory, Walking...)" value={label}
+          onChange={e=>handleLabelChange(e.target.value)}
+          onFocus={()=>{if(!label.trim())handleLabelChange("");}}
+          onBlur={()=>setTimeout(()=>setShowSugg(false),150)}
+          style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:15,padding:`12px ${label?38:16}px 12px 16px`,outline:"none",fontFamily:"'Inter',sans-serif"}}/>
+        {label&&<button type="button" onMouseDown={e=>e.preventDefault()} onClick={clearLabel}
+          style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",width:26,height:26,borderRadius:"50%",background:C.hover,border:"none",color:C.dim,display:"flex",alignItems:"center",justifyContent:"center"}}><IcX size={12}/></button>}
+        {showSugg&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",zIndex:10,marginTop:4,maxHeight:220,overflowY:"auto"}}>
           {suggestions.map((s,i)=><div key={i} onMouseDown={()=>{setLabel(s);setShowSugg(false);}} style={{padding:"12px 16px",fontSize:14,color:C.text,cursor:"pointer",borderBottom:i<suggestions.length-1?`1px solid ${C.border}`:"none"}}>{s}</div>)}
         </div>}
       </div>
@@ -1290,7 +1314,7 @@ function DescribeScreen({apiKey,onBack,onAdd}) {
       const now = new Date();
       onAdd({
         id:uid(), mealTitle:r.mealTitle, totalCalories:Math.round(r.totalCalories||0),
-        totalProteinG:Math.round(r.totalProteinG||0), totalCarbsG:Math.round(r.totalCarbsG||0), totalFatG:Math.round(r.totalFatG||0),
+        totalProteinG:Math.round(r.totalProteinG||0), totalCarbsG:Math.round(r.totalCarbsG||0), totalFatG:Math.round(r.totalFatG||0), totalSatFatG:Math.round(r.totalSatFatG||0),
         ingredients:r.ingredients||[], summary:r.summary, imageBase64:null,
         time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
         addedAt:now.getTime(), emoji:r.emoji||"🍽️"
@@ -1346,7 +1370,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
       const now = new Date();
       onAdd({
         id:uid(), mealTitle:r.mealTitle, totalCalories:Math.round(r.totalCalories||0),
-        totalProteinG:Math.round(r.totalProteinG||0), totalCarbsG:Math.round(r.totalCarbsG||0), totalFatG:Math.round(r.totalFatG||0),
+        totalProteinG:Math.round(r.totalProteinG||0), totalCarbsG:Math.round(r.totalCarbsG||0), totalFatG:Math.round(r.totalFatG||0), totalSatFatG:Math.round(r.totalSatFatG||0),
         ingredients:r.ingredients||[], summary:r.summary,
         imageBase64:imageData?.base64||null, imageMime:imageData?.mimeType||"image/jpeg",
         time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
@@ -1390,7 +1414,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
     </div>
   </div>;
 }
-function SwipeIngRow({ing,idx,editIdx,editField,servVal,calVal,setServVal,setCalVal,setEditIdx,commitServ,commitCal,onDelete}) {
+function SwipeIngRow({ing,idx,editIdx,editField,servVal,calVal,macroVal,setServVal,setCalVal,setMacroVal,setEditIdx,commitServ,commitCal,commitMacro,onDelete}) {
   const [swipeX,setSwipeX]=useState(0);const[swiping,setSwiping]=useState(false);
   const tx=useRef(0),ty=useRef(0);const THRESHOLD=70;
   const onTS=e=>{tx.current=e.touches[0].clientX;ty.current=e.touches[0].clientY;setSwiping(false);setSwipeX(0);};
@@ -1403,6 +1427,14 @@ function SwipeIngRow({ing,idx,editIdx,editField,servVal,calVal,setServVal,setCal
   const servings = ing.servings ?? 1;
   const editingServ = editIdx===idx && editField==="serv";
   const editingCal  = editIdx===idx && editField==="cal";
+  // Protein/carbs/fat/sat fat are always shown and always tappable to edit —
+  // unlike calories, a 0g macro the AI guessed wrong still needs a way in.
+  const macroDefs = [
+    {field:"protein", label:"protein",  color:C.protein, value:ing.proteinG},
+    {field:"carbs",   label:"carbs",    color:C.carbs,   value:ing.carbsG},
+    {field:"fat",     label:"fat",      color:C.fat,     value:ing.fatG},
+    {field:"satfat",  label:"sat fat",  color:C.satfat,  value:ing.satFatG},
+  ];
   return <div style={{position:"relative",overflow:"hidden",borderTop:`1px solid ${C.border}`}}>
     <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:16}}>
       <span style={{color:"#fff",fontSize:12,fontWeight:400,marginRight:4}}>Delete</span><IcTrash/>
@@ -1436,10 +1468,20 @@ function SwipeIngRow({ing,idx,editIdx,editField,servVal,calVal,setServVal,setCal
           {!editingCal&&<span style={{color:C.dim,display:"inline-flex",alignItems:"center",marginLeft:2}}><IcEdit size={11}/></span>}
         </div>
       </div>
-      <div style={{display:"flex",gap:10,marginTop:4}}>
-        {(ing.proteinG||0)>0&&<span style={{fontSize:10,fontWeight:300,color:C.protein}}>{Math.round(ing.proteinG)}g protein</span>}
-        {(ing.carbsG||0)>0&&<span style={{fontSize:10,fontWeight:300,color:C.carbs}}>{Math.round(ing.carbsG)}g carbs</span>}
-        {(ing.fatG||0)>0&&<span style={{fontSize:10,fontWeight:300,color:C.fat}}>{Math.round(ing.fatG)}g fat</span>}
+      <div style={{display:"flex",gap:10,marginTop:4,flexWrap:"wrap"}}>
+        {macroDefs.map(({field,label,color,value})=>{
+          const editing = editIdx===idx && editField===field;
+          return <div key={field} style={{display:"flex",alignItems:"baseline",gap:3,cursor:"pointer"}}
+            onClick={e=>{e.stopPropagation();if(!editing){setEditIdx(idx,field);setMacroVal(String(Math.round(value||0)));}}}>
+            {editing
+              ?<input autoFocus type="number" inputMode="numeric"
+                  style={{width:34,background:"transparent",border:"none",borderBottom:`1.5px solid ${color}`,color,fontSize:11,fontWeight:400,textAlign:"right",outline:"none",fontFamily:"'Inter',sans-serif",padding:0}}
+                  value={macroVal} onChange={e=>setMacroVal(e.target.value)}
+                  onBlur={()=>commitMacro(idx,field)} onKeyDown={e=>e.key==="Enter"&&commitMacro(idx,field)}/>
+              :<span style={{fontSize:10,fontWeight:300,color}}>{Math.round(value||0)}g {label}</span>
+            }
+          </div>;
+        })}
       </div>
     </div>
   </div>;
@@ -1470,7 +1512,7 @@ function inferServings(name) {
    proteinG, carbsG, fatG) is still rounded to a whole number before it's
    ever rendered or saved. */
 const normalise = ings => (ings||[]).map(raw => {
-  const ing = {...raw, proteinG: raw.proteinG||0, carbsG: raw.carbsG||0, fatG: raw.fatG||0};
+  const ing = {...raw, proteinG: raw.proteinG||0, carbsG: raw.carbsG||0, fatG: raw.fatG||0, satFatG: raw.satFatG||0};
   const given = Number(ing.servings);
   const info = inferServings(ing.name || "");
   ing.name = info.name || ing.name;
@@ -1479,10 +1521,12 @@ const normalise = ings => (ings||[]).map(raw => {
     ing.baseProteinG = ing.baseProteinG ?? 0;
     ing.baseCarbsG   = ing.baseCarbsG   ?? 0;
     ing.baseFatG     = ing.baseFatG     ?? 0;
+    ing.baseSatFatG  = ing.baseSatFatG  ?? 0;
     ing.calories = Math.round(ing.calories||0);
     ing.proteinG = Math.round(ing.proteinG||0);
     ing.carbsG   = Math.round(ing.carbsG||0);
     ing.fatG     = Math.round(ing.fatG||0);
+    ing.satFatG  = Math.round(ing.satFatG||0);
     return ing;
   }
   if (given > 1) {                          // per-unit values + explicit count
@@ -1491,10 +1535,12 @@ const normalise = ings => (ings||[]).map(raw => {
     ing.baseProteinG = r1(ing.proteinG);
     ing.baseCarbsG   = r1(ing.carbsG);
     ing.baseFatG     = r1(ing.fatG);
+    ing.baseSatFatG  = r1(ing.satFatG);
     ing.calories = Math.round(ing.baseCalories * given);
     ing.proteinG = Math.round(ing.baseProteinG * given);
     ing.carbsG   = Math.round(ing.baseCarbsG   * given);
     ing.fatG     = Math.round(ing.baseFatG     * given);
+    ing.satFatG  = Math.round(ing.baseSatFatG  * given);
     return ing;
   }
   if (info.n > 1) {                         // count only in the name — totals already combined
@@ -1503,10 +1549,12 @@ const normalise = ings => (ings||[]).map(raw => {
     ing.baseProteinG = r1(ing.proteinG / info.n);
     ing.baseCarbsG   = r1(ing.carbsG   / info.n);
     ing.baseFatG     = r1(ing.fatG     / info.n);
+    ing.baseSatFatG  = r1(ing.satFatG  / info.n);
     ing.calories = Math.round(ing.calories||0);
     ing.proteinG = Math.round(ing.proteinG||0);
     ing.carbsG   = Math.round(ing.carbsG||0);
     ing.fatG     = Math.round(ing.fatG||0);
+    ing.satFatG  = Math.round(ing.satFatG||0);
     return ing;
   }
   ing.servings = 1;
@@ -1514,10 +1562,12 @@ const normalise = ings => (ings||[]).map(raw => {
   ing.baseProteinG = r1(ing.proteinG);
   ing.baseCarbsG   = r1(ing.carbsG);
   ing.baseFatG     = r1(ing.fatG);
+  ing.baseSatFatG  = r1(ing.satFatG);
   ing.calories = Math.round(ing.calories||0);
   ing.proteinG = Math.round(ing.proteinG||0);
   ing.carbsG   = Math.round(ing.carbsG||0);
   ing.fatG     = Math.round(ing.fatG||0);
+  ing.satFatG  = Math.round(ing.satFatG||0);
   return ing;
 });
 function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
@@ -1530,6 +1580,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
   const [editField,setEditField]=useState(null);
   const [servVal,setServVal]=useState("");
   const [calVal,setCalVal]=useState("");
+  const [macroVal,setMacroVal]=useState("");
   const [adding,setAdding]=useState(false);
   const [addText,setAddText]=useState("");
   const [addError,setAddError]=useState("");
@@ -1556,6 +1607,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
       totalProteinG: newIngs.reduce((s,x)=>s+(x.proteinG||0),0),
       totalCarbsG:   newIngs.reduce((s,x)=>s+(x.carbsG||0),0),
       totalFatG:     newIngs.reduce((s,x)=>s+(x.fatG||0),0),
+      totalSatFatG:  newIngs.reduce((s,x)=>s+(x.satFatG||0),0),
       ingredients: newIngs});
   };
   const commitTitle = () => {
@@ -1572,7 +1624,8 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
         calories: Math.round(x.baseCalories*n),
         proteinG: Math.round((x.baseProteinG||0)*n),
         carbsG:   Math.round((x.baseCarbsG||0)*n),
-        fatG:     Math.round((x.baseFatG||0)*n)}));
+        fatG:     Math.round((x.baseFatG||0)*n),
+        satFatG:  Math.round((x.baseSatFatG||0)*n)}));
       setIngs(next); save(next);
     }
     setEditIdx(null); setEditField(null);
@@ -1581,6 +1634,22 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     const n = parseInt(calVal);
     if (!isNaN(n) && n >= 0) {
       const next = ings.map((x,i) => i!==idx ? x : ({...x, calories:n, baseCalories: x.servings>0 ? Math.round(n/x.servings) : n}));
+      setIngs(next); save(next);
+    }
+    setEditIdx(null); setEditField(null);
+  };
+  // Lets protein/carbs/fat/sat fat be corrected per ingredient, same tap-to-edit
+  // pattern as calories above — the AI's estimate isn't always right, and
+  // there was previously no way to fix a macro gram count short of deleting
+  // and re-adding the whole ingredient. Editing here sets the value for the
+  // CURRENT serving count and rescales the per-serving base to match, so
+  // changing servings afterward still scales correctly.
+  const macroKeyMap = {protein:["proteinG","baseProteinG"], carbs:["carbsG","baseCarbsG"], fat:["fatG","baseFatG"], satfat:["satFatG","baseSatFatG"]};
+  const commitMacro = (idx, field) => {
+    const n = parseInt(macroVal);
+    const [key, baseKey] = macroKeyMap[field] || [];
+    if (key && !isNaN(n) && n >= 0) {
+      const next = ings.map((x,i) => i!==idx ? x : ({...x, [key]: n, [baseKey]: x.servings>0 ? r1(n/x.servings) : r1(n)}));
       setIngs(next); save(next);
     }
     setEditIdx(null); setEditField(null);
@@ -1595,7 +1664,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
   };
   // Reuse a past item — opens a view first; the sheet's own button does the add.
   const addRecent = it => {
-    appendIngredients([{name:it.name,calories:it.calories,proteinG:it.proteinG,carbsG:it.carbsG,fatG:it.fatG}]);
+    appendIngredients([{name:it.name,calories:it.calories,proteinG:it.proteinG,carbsG:it.carbsG,fatG:it.fatG,satFatG:it.satFatG}]);
   };
   const addByText = async () => {
     if (!addText.trim()) return;
@@ -1603,7 +1672,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
     setAddLoading(true); setAddError("");
     try {
       const r = await analyze(apiKey, null, addText, (n,max)=>setAddLoading(`Retrying (${n}/${max-1})...`));
-      const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0}];
+      const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0,satFatG:r.totalSatFatG||0}];
       const extra = {};
       if (!meal.emoji || meal.mealTitle === "New meal") extra.emoji = r.emoji || meal.emoji;
       appendIngredients(raw, extra);
@@ -1617,7 +1686,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
       const shot = await fileToImageData(file);
       if (!shot) { setBusyMsg(""); setAddError("Couldn't read that photo"); return; }
       const r = await analyze(apiKey, shot.imageData, null, (n,max)=>setBusyMsg(`Hit a snag — retrying (${n}/${max-1})...`));
-      const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0}];
+      const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0,satFatG:r.totalSatFatG||0}];
       const extra = {};
       if (!meal.imageBase64) {
         const thumb = await makeThumbnail(shot.imageData.base64, "image/jpeg");
@@ -1702,10 +1771,10 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
         </span>}
       </div>
       {!isWorkout&&<div style={{display:"flex",gap:8,marginBottom:18}}>
-        {[["Protein",meal.totalProteinG,C.protein],["Carbs",meal.totalCarbsG,C.carbs],["Fat",meal.totalFatG,C.fat]].map(([lbl,v,col])=>
-          <div key={lbl} style={{flex:1,padding:"12px 10px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,display:"flex",flexDirection:"column",alignItems:"center"}}>
+        {[["Protein",meal.totalProteinG,C.protein],["Carbs",meal.totalCarbsG,C.carbs],["Fat",meal.totalFatG,C.fat],["Sat Fat",meal.totalSatFatG,C.satfat]].map(([lbl,v,col])=>
+          <div key={lbl} style={{flex:1,padding:"12px 6px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,display:"flex",flexDirection:"column",alignItems:"center"}}>
             <span style={{fontSize:18,fontWeight:200,color:col,letterSpacing:"-0.5px"}}>{Math.round(v||0)}g</span>
-            <span style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:2}}>{lbl}</span>
+            <span style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:2,textAlign:"center"}}>{lbl}</span>
           </div>
         )}
       </div>}
@@ -1716,7 +1785,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
         {ings.length===0&&!adding&&<div style={{padding:"4px 16px 14px"}}>
           <p style={{fontSize:12,fontWeight:300,color:C.dim,lineHeight:1.6}}>No items yet. Photograph or say them one at a time — the total adds itself up.</p>
         </div>}
-        {ings.map((ing,idx)=><SwipeIngRow key={idx} ing={ing} idx={idx} editIdx={editIdx} editField={editField} servVal={servVal} calVal={calVal} setServVal={setServVal} setCalVal={setCalVal} setEditIdx={setEditIdx2} commitServ={commitServ} commitCal={commitCal} onDelete={i=>{const next=ings.filter((_,j)=>j!==i);setIngs(next);save(next);}}/>)}
+        {ings.map((ing,idx)=><SwipeIngRow key={idx} ing={ing} idx={idx} editIdx={editIdx} editField={editField} servVal={servVal} calVal={calVal} macroVal={macroVal} setServVal={setServVal} setCalVal={setCalVal} setMacroVal={setMacroVal} setEditIdx={setEditIdx2} commitServ={commitServ} commitCal={commitCal} commitMacro={commitMacro} onDelete={i=>{const next=ings.filter((_,j)=>j!==i);setIngs(next);save(next);}}/>)}
         {!adding&&<div style={{display:"flex",gap:8,padding:"12px 14px",borderTop:`1px solid ${C.border}`}}>
           <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:C.hover,border:`1px solid ${C.border}`,borderRadius:10,color:C.text,fontSize:12,fontWeight:400,padding:"11px"}} onClick={()=>photoRef.current.click()}>
             <IcCamera size={15}/> Photo item
@@ -1785,6 +1854,7 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
           {(previewItem.proteinG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.protein}}>{Math.round(previewItem.proteinG)}g protein</span>}
           {(previewItem.carbsG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.carbs}}>{Math.round(previewItem.carbsG)}g carbs</span>}
           {(previewItem.fatG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.fat}}>{Math.round(previewItem.fatG)}g fat</span>}
+          {(previewItem.satFatG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.satfat}}>{Math.round(previewItem.satFatG)}g sat fat</span>}
         </div>
         <div style={{display:"flex",gap:8}}>
           <button style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,borderRadius:12,color:C.sub,fontSize:14,fontWeight:500,padding:"14px"}} onClick={()=>setPreviewItem(null)}>Cancel</button>
@@ -1885,6 +1955,7 @@ function LibraryMealRow({tpl,onPick,onDelete}) {
           {(tpl.totalProteinG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.protein}}>{Math.round(tpl.totalProteinG)}p</span>}
           {(tpl.totalCarbsG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.carbs}}>{Math.round(tpl.totalCarbsG)}c</span>}
           {(tpl.totalFatG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.fat}}>{Math.round(tpl.totalFatG)}f</span>}
+          {(tpl.totalSatFatG||0)>0&&<span style={{fontSize:9,fontWeight:300,color:C.satfat}}>{Math.round(tpl.totalSatFatG)}s</span>}
         </div>
       </div>
     </div>
@@ -1904,6 +1975,7 @@ function LibraryItemRow({item,onPick,onDelete}) {
           {(item.proteinG||0)>0&&<span style={{fontSize:10,fontWeight:300,color:C.protein}}>{Math.round(item.proteinG)}p</span>}
           {(item.carbsG||0)>0&&<span style={{fontSize:10,fontWeight:300,color:C.carbs}}>{Math.round(item.carbsG)}c</span>}
           {(item.fatG||0)>0&&<span style={{fontSize:10,fontWeight:300,color:C.fat}}>{Math.round(item.fatG)}f</span>}
+          {(item.satFatG||0)>0&&<span style={{fontSize:10,fontWeight:300,color:C.satfat}}>{Math.round(item.satFatG)}s</span>}
           {item.uses>1&&<span style={{fontSize:10,fontWeight:300,color:C.dim}}>{item.uses}×</span>}
         </div>
       </div>
@@ -1933,6 +2005,7 @@ function LibraryPreviewScreen({tpl,kind,onBack,onAddWhole,onAddSelected,onAddIte
             {(tpl.proteinG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.protein}}>{Math.round(tpl.proteinG)}g protein</span>}
             {(tpl.carbsG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.carbs}}>{Math.round(tpl.carbsG)}g carbs</span>}
             {(tpl.fatG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.fat}}>{Math.round(tpl.fatG)}g fat</span>}
+            {(tpl.satFatG||0)>0&&<span style={{fontSize:12,fontWeight:300,color:C.satfat}}>{Math.round(tpl.satFatG)}g sat fat</span>}
           </div>
         </div>
         <button style={{width:"100%",marginTop:16,background:C.accent,border:"none",borderRadius:14,color:C.bg,fontSize:15,fontWeight:500,padding:"16px"}} onClick={()=>onAddItem(tpl)}>Add item →</button>
@@ -2341,10 +2414,11 @@ function App() {
     const totalProteinG = chosen.reduce((s,x)=>s+(x.proteinG||0),0);
     const totalCarbsG   = chosen.reduce((s,x)=>s+(x.carbsG||0),0);
     const totalFatG     = chosen.reduce((s,x)=>s+(x.fatG||0),0);
+    const totalSatFatG  = chosen.reduce((s,x)=>s+(x.satFatG||0),0);
     const m={
       id:uid(), mealTitle:tpl.mealTitle, emoji:tpl.emoji,
       summary: ingredientsSubset ? "" : tpl.summary,
-      totalCalories, totalProteinG, totalCarbsG, totalFatG,
+      totalCalories, totalProteinG, totalCarbsG, totalFatG, totalSatFatG,
       ingredients:chosen, imageBase64:null, ...nowStamp()
     };
     saveMealsRobust(k,[...loadMeals(k),m]);
@@ -2354,12 +2428,12 @@ function App() {
   // Start a meal from a single saved ingredient.
   const addItemAsMeal = it => {
     const k=dateKeyRef.current;
-    const ing={name:it.name,calories:it.calories,proteinG:it.proteinG||0,carbsG:it.carbsG||0,fatG:it.fatG||0,
-      baseCalories:it.calories,baseProteinG:it.proteinG||0,baseCarbsG:it.carbsG||0,baseFatG:it.fatG||0,servings:1};
+    const ing={name:it.name,calories:it.calories,proteinG:it.proteinG||0,carbsG:it.carbsG||0,fatG:it.fatG||0,satFatG:it.satFatG||0,
+      baseCalories:it.calories,baseProteinG:it.proteinG||0,baseCarbsG:it.carbsG||0,baseFatG:it.fatG||0,baseSatFatG:it.satFatG||0,servings:1};
     const m={
       id:uid(), mealTitle:it.name, emoji:"🍽️", summary:"",
       totalCalories:it.calories, totalProteinG:it.proteinG||0,
-      totalCarbsG:it.carbsG||0, totalFatG:it.fatG||0,
+      totalCarbsG:it.carbsG||0, totalFatG:it.fatG||0, totalSatFatG:it.satFatG||0,
       ingredients:[ing], imageBase64:null, ...nowStamp()
     };
     saveMealsRobust(k,[...loadMeals(k),m]);
