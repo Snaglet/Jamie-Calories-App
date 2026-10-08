@@ -97,7 +97,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // Bumped on every delivered build so a stale cached copy (very common with
 // "Add to Home Screen" / re-opened local files) is instantly identifiable —
 // visible in Settings and as a small footer on the home screen.
-const APP_BUILD = "2026.08.29-storage-dateguard-1";
+const APP_BUILD = "2026.10.08-satfat-export-1";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -335,6 +335,66 @@ function deleteMealsBefore(cutoffKey) {
     keysToDelete.forEach(k => localStorage.removeItem(k));
     return keysToDelete.length;
   } catch(e) { console.warn("deleteMealsBefore failed:", e); return 0; }
+}
+/* ─── CSV export / backup ───────────────────────────────────────────────────
+   The whole point of "delete everything before this date" is to free up
+   space, which is exactly the moment data could be lost for good. These
+   build a plain CSV of everything stored — one row per meal/workout plus
+   one row per weight entry — so it can be downloaded (and kept as a real
+   health record) before anything is ever deleted.
+   ───────────────────────────────────────────────────────────────────────────*/
+function csvField(v) {
+  const s = v==null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+}
+const CSV_HEADER = ["Date","Type","Title","Time","Calories","Protein_g","Carbs_g","Fat_g","SatFat_g","Weight_lbs","Ingredients"];
+/* Rows for every meal/workout on days strictly before cutoffKey (or every
+   stored day, if cutoffKey is omitted) plus every weight entry in that same
+   range — the exact slice that deleteMealsBefore would otherwise erase. */
+function buildHistoryCsvRows(cutoffKey) {
+  const rows = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith("jct:m:")) continue;
+      const dayKey = key.slice(6);
+      if (cutoffKey && !(dayKey < cutoffKey)) continue;
+      const meals = JSON.parse(localStorage.getItem(key) || "[]");
+      meals.forEach(m => {
+        const ingredients = (m.ingredients||[]).map(ing => {
+          const parts = [ing.name];
+          if (ing.servings && ing.servings !== 1) parts.push(`x${ing.servings}`);
+          return parts.join(" ");
+        }).join("; ");
+        rows.push([
+          dayKey, m.type==="workout" ? "Workout" : "Meal", m.mealTitle||"", m.time||"",
+          Math.round(m.totalCalories||0), Math.round(m.totalProteinG||0), Math.round(m.totalCarbsG||0),
+          Math.round(m.totalFatG||0), Math.round(m.totalSatFatG||0), "", ingredients
+        ]);
+      });
+    }
+  } catch(e) { console.warn("history export (meals) failed:", e); }
+  try {
+    const weights = loadWeights().filter(w => !cutoffKey || w.date < cutoffKey);
+    weights.forEach(w => rows.push([w.date,"Weight","Weight","",  "","","","","", w.value, ""]));
+  } catch(e) { console.warn("history export (weights) failed:", e); }
+  rows.sort((a,b) => String(a[0]).localeCompare(String(b[0])));
+  return rows;
+}
+function buildHistoryCsv(cutoffKey) {
+  const rows = [CSV_HEADER, ...buildHistoryCsvRows(cutoffKey)];
+  return rows.map(r => r.map(csvField).join(",")).join("\r\n");
+}
+function downloadTextFile(filename, mimeType, text) {
+  try {
+    const blob = new Blob([text], {type: mimeType});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return true;
+  } catch(e) { console.warn("download failed:", e); return false; }
 }
 async function saveMealsWithFallback(dateKey, meals, rawImage) {
   if (saveMeals(dateKey, meals)) return true;
@@ -950,9 +1010,22 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal,onDeleteBefore}) {
   const [cutoffVal,setCutoffVal]=useState("");
   const [confirmingDelete,setConfirmingDelete]=useState(false);
   const [deleteResult,setDeleteResult]=useState(null);
+  const [exportMsg,setExportMsg]=useState("");
   const masked = apiKey ? `${apiKey.slice(0,14)}...${apiKey.slice(-4)}` : null;
+  const exportAll = () => {
+    const csv = buildHistoryCsv();
+    const ok = downloadTextFile(`just-calories-export-${fmtKey(new Date())}.csv`, "text/csv;charset=utf-8", csv);
+    setExportMsg(ok ? "✓ Download started — check your downloads." : "Couldn't generate the export — try again.");
+    setTimeout(()=>setExportMsg(""), 4000);
+  };
+  // A backup of exactly what's about to be erased downloads automatically,
+  // every time — not an extra step to remember, so the data is never gone
+  // for good even if you never think to export it yourself beforehand.
   const runDeleteBefore = () => {
     if (!cutoffVal) return;
+    if (buildHistoryCsvRows(cutoffVal).length > 0) {
+      downloadTextFile(`just-calories-backup-before-${cutoffVal}.csv`, "text/csv;charset=utf-8", buildHistoryCsv(cutoffVal));
+    }
     const n = onDeleteBefore(cutoffVal);
     setDeleteResult(n);
     setConfirmingDelete(false);
@@ -1018,8 +1091,14 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal,onDeleteBefore}) {
         <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.7}}>Meal photos are saved on this device at {PHOTO_MAX_PX}px and cleared after {PHOTO_RETENTION_DAYS} days. Full meal entries (calories, ingredients) are automatically cleared after {MEAL_RETENTION_DAYS} days so the app never runs out of space. Progress photos are stored separately at {PROGRESS_MAX_PX}px and never expire. Nothing leaves your phone except the image sent for analysis.</p>
       </div>
       <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
+        <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>Export your history</p>
+        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:14}}>Download every meal, workout and weight entry you've ever logged as a CSV — opens in Excel, Numbers or Google Sheets. Good for a permanent health record, independent of anything stored on this device.</p>
+        <button style={{width:"100%",background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:12,color:C.accent,fontSize:14,fontWeight:500,padding:"12px"}} onClick={exportAll}>Export all history (CSV)</button>
+        {exportMsg&&<p style={{fontSize:12,color:C.accent,fontWeight:500,textAlign:"center",marginTop:10}}>{exportMsg}</p>}
+      </div>
+      <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
         <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>Delete old entries</p>
-        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:14}}>Pick a date and every meal and workout logged before it — all at once, not ingredient by ingredient — is removed from this device. Everything from that date onward is kept.</p>
+        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:14}}>Pick a date and every meal and workout logged before it — all at once, not ingredient by ingredient — is removed from this device. A CSV backup of exactly what's being deleted downloads automatically first, every time, so nothing is ever lost for good. Everything from that date onward is kept.</p>
         <input type="date" value={cutoffVal} max={fmtKey(new Date())}
           onChange={e=>{setCutoffVal(e.target.value);setConfirmingDelete(false);setDeleteResult(null);}}
           style={{width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:14,padding:"12px 14px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:10,colorScheme:"dark"}}/>
@@ -1027,14 +1106,14 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal,onDeleteBefore}) {
           ?<button style={{width:"100%",background:C.rDim,border:`1px solid ${C.rMid}`,borderRadius:12,color:C.red,fontSize:14,fontWeight:500,padding:"12px",opacity:cutoffVal?1:0.4}}
               onClick={()=>{setConfirmingDelete(true);setDeleteResult(null);}} disabled={!cutoffVal}>Delete everything before this date</button>
           :<div style={{display:"flex",flexDirection:"column",gap:8}}>
-              <p style={{fontSize:12,color:C.red,fontWeight:500,textAlign:"center"}}>This can't be undone. Delete all entries before {cutoffVal}?</p>
+              <p style={{fontSize:12,color:C.red,fontWeight:500,textAlign:"center"}}>A backup CSV will download first, then everything before {cutoffVal} is deleted for good. Continue?</p>
               <div style={{display:"flex",gap:8}}>
                 <button style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,borderRadius:12,color:C.sub,fontSize:13,fontWeight:500,padding:"11px"}} onClick={()=>setConfirmingDelete(false)}>Cancel</button>
-                <button style={{flex:1,background:C.red,border:"none",borderRadius:12,color:"#fff",fontSize:13,fontWeight:500,padding:"11px"}} onClick={runDeleteBefore}>Yes, delete</button>
+                <button style={{flex:1,background:C.red,border:"none",borderRadius:12,color:"#fff",fontSize:13,fontWeight:500,padding:"11px"}} onClick={runDeleteBefore}>Yes, back up & delete</button>
               </div>
             </div>
         }
-        {deleteResult!==null&&<p style={{fontSize:12,color:C.accent,fontWeight:500,textAlign:"center",marginTop:10}}>{deleteResult>0?`✓ Deleted ${deleteResult} day${deleteResult===1?"":"s"} of entries.`:"No entries found before that date."}</p>}
+        {deleteResult!==null&&<p style={{fontSize:12,color:C.accent,fontWeight:500,textAlign:"center",marginTop:10}}>{deleteResult>0?`✓ Backup downloaded, then deleted ${deleteResult} day${deleteResult===1?"":"s"} of entries.`:"No entries found before that date — nothing to back up or delete."}</p>}
       </div>
       <p style={{fontSize:10,fontWeight:300,color:C.dim,textAlign:"center",padding:"4px 0 8px"}}>Build {APP_BUILD}</p>
     </div>
