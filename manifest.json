@@ -1,9 +1,17 @@
 {
-  "name": "Just Calories",
-  "short_name": "Just Calories",
+  "name": "Cally Tally",
+  "short_name": "Cally Tally",
+  "description": "Calories, weight & workouts",
+  "start_url": ".",
   "display": "standalone",
-  "start_url": "./",
-  "scope": "./",
   "background_color": "#0A0A0F",
-  "theme_color": "#0A0A0F"
+  "theme_color": "#0A0A0F",
+  "icons": [
+    {
+      "src": "cally_tally_icon_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }
