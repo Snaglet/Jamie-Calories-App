@@ -99,7 +99,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // Bumped on every delivered build so a stale cached copy (very common with
 // "Add to Home Screen" / re-opened local files) is instantly identifiable —
 // visible in Settings and as a small footer on the home screen.
-const APP_BUILD = "2026.10.09-ghsync-1";
+const APP_BUILD = "2026.10.09-ghsync-2";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -271,12 +271,23 @@ async function ghPut(token, repo, path, text, message) {
   }
   throw new Error(`PUT ${path}: conflict after retries`);
 }
+async function ghMergeRemoteWeights(token, repo, local) {
+  const r = await fetch(`https://api.github.com/repos/${repo}/contents/weights.json?t=${Date.now()}`, { headers: { "Authorization": `Bearer ${token}`, "Accept": "application/vnd.github+json" }, cache: "no-store" });
+  if (!r.ok) return local;
+  const j = await r.json();
+  const bin = atob((j.content || "").replace(/\s/g, ""));
+  const remote = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0))) || "[]");
+  if (!Array.isArray(remote)) return local;
+  const byDate = {}; remote.forEach(w => { if (w && w.date) byDate[w.date] = w; }); local.forEach(w => { if (w && w.date) byDate[w.date] = w; });
+  return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+}
 let ghRunning = false, ghAgain = false, ghTimer = null;
-async function ghSyncAll() {
+async function ghSyncAll(opts = {}) {
   const token = loadGhToken(), repo = loadGhRepo();
-  if (!token) { setGhStatus({ error: "No GitHub token set" }); return false; }
-  if (ghRunning) { ghAgain = true; return false; }
+  if (!token) { const msg = "No GitHub token set"; setGhStatus({ error: msg }); return { ok: false, error: msg }; }
+  if (ghRunning) { ghAgain = true; return { ok: false, busy: true, error: "A sync is already running — try again in a moment" }; }
   ghRunning = true;
+  let daysFound = 0, daysUploaded = 0;
   try {
     do {
       ghAgain = false;
@@ -288,21 +299,28 @@ async function ghSyncAll() {
         files.push([`days/${key.slice(6)}.json`, JSON.stringify(ghStrip(list), null, 2) + "\n"]);
       }
       files.sort((a, b) => a[0].localeCompare(b[0]));
-      files.push(["weights.json", JSON.stringify(loadWeights(), null, 2) + "\n"]);
-      const hashes = loadGhHashes(); const k0 = `${repo}|`;
+      daysFound = files.length;
+      // Weights: merge with what's already in the repo (local wins per date)
+      // so a device with no/fewer weigh-ins can never wipe the remote history.
+      let weights = loadWeights();
+      try { weights = await ghMergeRemoteWeights(token, repo, weights); } catch (e) { console.warn("weights merge skipped:", e); }
+      files.push(["weights.json", JSON.stringify(weights, null, 2) + "\n"]);
+      const hashes = opts.force ? {} : loadGhHashes(); const k0 = `${repo}|`;
       let n = 0;
       for (const [path, text] of files) {
         const h = ghHash(text);
         if (hashes[k0 + path] === h) continue;
         await ghPut(token, repo, path, text, `Sync ${path}`);
         hashes[k0 + path] = h; saveGhHashes(hashes); n++;
+        if (path.startsWith("days/")) daysUploaded++;
       }
-      setGhStatus({ lastSync: new Date().toISOString(), error: "", lastCount: n });
+      setGhStatus({ lastSync: new Date().toISOString(), error: "", lastCount: n, daysFound, daysUploaded });
     } while (ghAgain);
-    return true;
+    return { ok: true, daysFound, daysUploaded };
   } catch (e) {
-    setGhStatus({ error: (navigator.onLine === false ? "Offline — " : "") + (e && e.message || String(e)) });
-    return false;
+    const msg = (navigator.onLine === false ? "Offline — " : "") + (e && e.message || String(e));
+    setGhStatus({ error: msg });
+    return { ok: false, error: msg, daysFound, daysUploaded };
   } finally { ghRunning = false; }
 }
 function ghScheduleSync(delay = 3000) {
@@ -1093,7 +1111,19 @@ function GhSyncCard() {
   const saveTok=()=>{const t=val.trim();if(!t)return;saveGhToken(t);setToken(t);setVal("");ghScheduleSync(200);};
   const clearTok=()=>{saveGhToken("");setToken("");};
   const saveRepoVal=v=>{setRepo(v);saveGhRepo(v.trim()||GH_DEFAULT_REPO);};
-  const syncNow=async()=>{setBusy(true);try{await ghSyncAll();}finally{setBusy(false);}};
+  const [result,setResult]=useState("");
+  const syncNow=async()=>{
+    if(busy)return;
+    setBusy(true);setResult("");
+    let res;
+    try{res=await ghSyncAll({force:true});}catch(e){res={ok:false,error:e&&e.message||String(e)};}
+    setBusy(false);
+    if(res&&res.ok){
+      setResult(res.daysFound===0
+        ?"⚠ Synced, but no meal days were found on this device. If you log meals in the home-screen app, open Settings there (Safari and the home-screen app keep separate storage)."
+        :`✓ Synced ${res.daysUploaded} day${res.daysUploaded===1?"":"s"} (${res.daysFound} found on this device) + weights`);
+    }else setResult(`✗ ${res&&res.error||"Sync failed"}`);
+  };
   const inp={width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:14,padding:"12px 14px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:8};
   return <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
     <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>GitHub sync (permanent history)</p>
@@ -1107,9 +1137,10 @@ function GhSyncCard() {
     <button style={{width:"100%",background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:12,color:C.accent,fontSize:13,fontWeight:500,padding:"10px",marginBottom:12}} onClick={saveTok}>Save token</button>
     <p style={{fontSize:12,color:C.sub,marginBottom:6}}>Repository (owner/name)</p>
     <input type="text" value={repo} placeholder={GH_DEFAULT_REPO} onChange={e=>saveRepoVal(e.target.value)} style={inp}/>
-    <button style={{width:"100%",background:C.accent,border:"none",borderRadius:12,color:C.bg,fontSize:14,fontWeight:500,padding:"12px",opacity:(token&&!busy)?1:0.4}} disabled={!token||busy} onClick={syncNow}>{busy?"Syncing...":"Sync now"}</button>
+    <button style={{width:"100%",background:C.accent,border:"none",borderRadius:12,color:C.bg,fontSize:14,fontWeight:500,padding:"12px",opacity:(token&&!busy)?1:0.4}} disabled={!token||busy} onClick={syncNow}>{busy?"Syncing…":"Sync now"}</button>
+    {result&&<p style={{fontSize:12,fontWeight:500,color:result.startsWith("✓")?C.accent:C.red,textAlign:"center",marginTop:10,lineHeight:1.5}}>{result}</p>}
     <p style={{fontSize:11,color:st.error?C.red:C.dim,textAlign:"center",marginTop:10}}>
-      {st.error?`Sync error: ${st.error}`:st.lastSync?`Last synced ${new Date(st.lastSync).toLocaleString()}`:"Not synced yet"}
+      {st.error?`Sync error: ${st.error}`:st.lastSync?`Last synced ${new Date(st.lastSync).toLocaleString()}${st.daysFound!=null?` · ${st.daysFound} days on this device`:""}`:"Not synced yet"}
     </p>
   </div>;
 }
