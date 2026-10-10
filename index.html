@@ -99,7 +99,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // Bumped on every delivered build so a stale cached copy (very common with
 // "Add to Home Screen" / re-opened local files) is instantly identifiable —
 // visible in Settings and as a small footer on the home screen.
-const APP_BUILD = "2026.10.09-flame-icon-text-5";
+const APP_BUILD = "2026.10.09-no-meal-photo-storage-1";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -1461,7 +1461,9 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
         id:uid(), mealTitle:r.mealTitle, totalCalories:Math.round(r.totalCalories||0),
         totalProteinG:Math.round(r.totalProteinG||0), totalCarbsG:Math.round(r.totalCarbsG||0), totalFatG:Math.round(r.totalFatG||0), totalSatFatG:Math.round(r.totalSatFatG||0),
         ingredients:r.ingredients||[], summary:r.summary,
-        imageBase64:imageData?.base64||null, imageMime:imageData?.mimeType||"image/jpeg",
+        // Meals are shown by their emoji, not a stored photo — keeps localStorage
+        // small so meals don't have to be deleted just to make room for new ones.
+        imageBase64:null,
         time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
         addedAt:now.getTime(), emoji:r.emoji||null
       });
@@ -1778,10 +1780,8 @@ function DetailScreen({meal,onBack,onUpdate,onDelete,apiKey}) {
       const r = await analyze(apiKey, shot.imageData, null, (n,max)=>setBusyMsg(`Hit a snag — retrying (${n}/${max-1})...`));
       const raw = r.ingredients?.length ? r.ingredients : [{name:r.mealTitle,calories:r.totalCalories,proteinG:r.totalProteinG||0,carbsG:r.totalCarbsG||0,fatG:r.totalFatG||0,satFatG:r.totalSatFatG||0}];
       const extra = {};
-      if (!meal.imageBase64) {
-        const thumb = await makeThumbnail(shot.imageData.base64, "image/jpeg");
-        if (thumb) { extra.imageBase64 = thumb; extra.imageMime = "image/jpeg"; }
-      }
+      // No stored photo here either — relies on the emoji fallback, same as the
+      // initial meal capture, so storage stays small.
       if (!meal.emoji || meal.mealTitle === "New meal") extra.emoji = r.emoji || meal.emoji;
       appendIngredients(raw, extra);
     } catch(e) { setAddError(e.message||"Couldn't analyze that photo"); }
