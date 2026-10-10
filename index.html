@@ -99,7 +99,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // Bumped on every delivered build so a stale cached copy (very common with
 // "Add to Home Screen" / re-opened local files) is instantly identifiable —
 // visible in Settings and as a small footer on the home screen.
-const APP_BUILD = "2026.10.09-no-meal-photo-storage-2";
+const APP_BUILD = "2026.10.09-ghsync-1";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -231,13 +231,86 @@ async function getPinnedBeforePhotos() {
   } catch(e) { console.warn("before-photos read failed:",e); return empty; }
 }
 const loadMeals = d => { try { return JSON.parse(ls.get(`jct:m:${d}`) || "[]"); } catch { return []; } };
-const saveMeals = (d,m) => ls.set(`jct:m:${d}`, JSON.stringify(m));
+const saveMeals = (d,m) => { const ok = ls.set(`jct:m:${d}`, JSON.stringify(m)); if (ok) ghScheduleSync(); return ok; };
 const loadBaseGoal = () => parseInt(ls.get("jct:basegoal") || "1600");
 const saveBaseGoal = g => ls.set("jct:basegoal", String(g));
 const loadKey = () => ls.get("jct:apikey") || "";
 const saveKey = k => ls.set("jct:apikey", k);
 const loadWeights = () => { try { return JSON.parse(ls.get("jct:weights") || "[]"); } catch { return []; } };
-const saveWeights = w => ls.set("jct:weights", JSON.stringify(w));
+const saveWeights = w => { const ok = ls.set("jct:weights", JSON.stringify(w)); if (ok) ghScheduleSync(); return ok; };
+/* ---- GitHub sync: permanent meal history ----
+   Every day's meals/workouts (photos stripped) and weights are mirrored to a
+   private GitHub repo via the contents API. Never deletes remote files, even
+   when local pruning removes old days. Fails quietly — never blocks the app. */
+const GH_DEFAULT_REPO = "snaglet/jamie-health-data";
+const loadGhToken = () => ls.get("jct:ghtoken") || "";
+const saveGhToken = t => ls.set("jct:ghtoken", t);
+const loadGhRepo = () => ls.get("jct:ghrepo") || GH_DEFAULT_REPO;
+const saveGhRepo = r => ls.set("jct:ghrepo", r);
+const loadGhHashes = () => { try { return JSON.parse(ls.get("jct:ghsync:hashes") || "{}"); } catch { return {}; } };
+const saveGhHashes = h => ls.set("jct:ghsync:hashes", JSON.stringify(h));
+const loadGhStatus = () => { try { return JSON.parse(ls.get("jct:ghsync:status") || "{}"); } catch { return {}; } };
+const ghListeners = new Set();
+const setGhStatus = s => { const next = {...loadGhStatus(), ...s}; ls.set("jct:ghsync:status", JSON.stringify(next)); ghListeners.forEach(f => { try { f(next); } catch {} }); };
+const ghHash = str => { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16) + ":" + str.length; };
+const ghB64 = str => { const bytes = new TextEncoder().encode(str); let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); };
+const ghStrip = list => (Array.isArray(list) ? list : []).map(m => { if (!m || typeof m !== "object") return m; const { imageBase64, imageMime, ...rest } = m; return rest; });
+async function ghPut(token, repo, path, text, message) {
+  const url = `https://api.github.com/repos/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`;
+  const headers = { "Authorization": `Bearer ${token}`, "Accept": "application/vnd.github+json" };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let sha;
+    const g = await fetch(url + `?t=${Date.now()}`, { headers, cache: "no-store" });
+    if (g.ok) { const j = await g.json(); sha = j.sha; }
+    else if (g.status !== 404) throw new Error(`GET ${path}: HTTP ${g.status}`);
+    const body = { message, content: ghB64(text) }; if (sha) body.sha = sha;
+    const p = await fetch(url, { method: "PUT", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (p.ok) return true;
+    if (p.status === 409 || p.status === 422) continue; // sha conflict — refetch and retry
+    throw new Error(`PUT ${path}: HTTP ${p.status}`);
+  }
+  throw new Error(`PUT ${path}: conflict after retries`);
+}
+let ghRunning = false, ghAgain = false, ghTimer = null;
+async function ghSyncAll() {
+  const token = loadGhToken(), repo = loadGhRepo();
+  if (!token) { setGhStatus({ error: "No GitHub token set" }); return false; }
+  if (ghRunning) { ghAgain = true; return false; }
+  ghRunning = true;
+  try {
+    do {
+      ghAgain = false;
+      const files = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !/^jct:m:\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+        let list = []; try { list = JSON.parse(localStorage.getItem(key) || "[]"); } catch {}
+        files.push([`days/${key.slice(6)}.json`, JSON.stringify(ghStrip(list), null, 2) + "\n"]);
+      }
+      files.sort((a, b) => a[0].localeCompare(b[0]));
+      files.push(["weights.json", JSON.stringify(loadWeights(), null, 2) + "\n"]);
+      const hashes = loadGhHashes(); const k0 = `${repo}|`;
+      let n = 0;
+      for (const [path, text] of files) {
+        const h = ghHash(text);
+        if (hashes[k0 + path] === h) continue;
+        await ghPut(token, repo, path, text, `Sync ${path}`);
+        hashes[k0 + path] = h; saveGhHashes(hashes); n++;
+      }
+      setGhStatus({ lastSync: new Date().toISOString(), error: "", lastCount: n });
+    } while (ghAgain);
+    return true;
+  } catch (e) {
+    setGhStatus({ error: (navigator.onLine === false ? "Offline — " : "") + (e && e.message || String(e)) });
+    return false;
+  } finally { ghRunning = false; }
+}
+function ghScheduleSync(delay = 3000) {
+  if (!loadGhToken()) return;
+  clearTimeout(ghTimer);
+  ghTimer = setTimeout(() => { ghSyncAll().catch(() => {}); }, delay);
+}
+
 const loadWorkoutLabels = () => { try { return JSON.parse(ls.get("jct:wlabels") || "[]"); } catch { return []; } };
 const saveWorkoutLabels = arr => ls.set("jct:wlabels", JSON.stringify(arr));
 const loadLibrary = () => { try { return JSON.parse(ls.get("jct:lib") || "[]"); } catch { return []; } };
@@ -1009,6 +1082,37 @@ function WorkoutModal({onAdd,onClose}) {
     </div>
   </div>;
 }
+function GhSyncCard() {
+  const [token,setToken]=useState(()=>loadGhToken());
+  const [val,setVal]=useState("");
+  const [repo,setRepo]=useState(()=>loadGhRepo());
+  const [st,setSt]=useState(()=>loadGhStatus());
+  const [busy,setBusy]=useState(false);
+  useEffect(()=>{ghListeners.add(setSt);return()=>{ghListeners.delete(setSt);};},[]);
+  const masked = token ? `${token.slice(0,11)}...${token.slice(-4)}` : null;
+  const saveTok=()=>{const t=val.trim();if(!t)return;saveGhToken(t);setToken(t);setVal("");ghScheduleSync(200);};
+  const clearTok=()=>{saveGhToken("");setToken("");};
+  const saveRepoVal=v=>{setRepo(v);saveGhRepo(v.trim()||GH_DEFAULT_REPO);};
+  const syncNow=async()=>{setBusy(true);try{await ghSyncAll();}finally{setBusy(false);}};
+  const inp={width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:14,padding:"12px 14px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:8};
+  return <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
+    <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>GitHub sync (permanent history)</p>
+    <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:12}}>Backs up every day's meals and workouts (without photos) and your weights to a private GitHub repo, automatically after each change. Old days pruned from this phone stay in the repo forever.</p>
+    <p style={{fontSize:12,color:C.sub,marginBottom:6}}>GitHub token</p>
+    {masked&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"10px 12px",background:C.aDim,borderRadius:10,border:`1px solid ${C.aMid}`}}>
+      <div style={{flex:1}}><span style={{fontSize:11,color:C.accent,fontWeight:600}}>✓ Token saved: </span><span style={{fontSize:11,color:C.sub,fontFamily:"monospace"}}>{masked}</span></div>
+      <button style={{background:C.rDim,border:`1px solid ${C.rMid}`,borderRadius:8,color:C.red,fontSize:11,fontWeight:500,padding:"4px 10px"}} onClick={clearTok}>Clear</button>
+    </div>}
+    <input type="password" placeholder={masked?"Enter a new token to replace...":"github_pat_..."} value={val} onChange={e=>setVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveTok()} style={inp}/>
+    <button style={{width:"100%",background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:12,color:C.accent,fontSize:13,fontWeight:500,padding:"10px",marginBottom:12}} onClick={saveTok}>Save token</button>
+    <p style={{fontSize:12,color:C.sub,marginBottom:6}}>Repository (owner/name)</p>
+    <input type="text" value={repo} placeholder={GH_DEFAULT_REPO} onChange={e=>saveRepoVal(e.target.value)} style={inp}/>
+    <button style={{width:"100%",background:C.accent,border:"none",borderRadius:12,color:C.bg,fontSize:14,fontWeight:500,padding:"12px",opacity:(token&&!busy)?1:0.4}} disabled={!token||busy} onClick={syncNow}>{busy?"Syncing...":"Sync now"}</button>
+    <p style={{fontSize:11,color:st.error?C.red:C.dim,textAlign:"center",marginTop:10}}>
+      {st.error?`Sync error: ${st.error}`:st.lastSync?`Last synced ${new Date(st.lastSync).toLocaleString()}`:"Not synced yet"}
+    </p>
+  </div>;
+}
 function SettingsScreen({apiKey,onSave,onClear,onBack,goal,onDeleteBefore}) {
   const [val,setVal]=useState("");
   const [saved,setSaved]=useState(false);
@@ -1098,6 +1202,7 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal,onDeleteBefore}) {
         <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:8}}>Photos & storage</p>
         <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.7}}>Meal photos aren't saved — meals are shown with an emoji instead, to keep this app from running out of space. Any older meal photos saved before this change still get cleared automatically after {PHOTO_RETENTION_DAYS} days. Full meal entries (calories, ingredients) are automatically cleared after {MEAL_RETENTION_DAYS} days so the app never runs out of space. Progress photos are stored separately at {PROGRESS_MAX_PX}px and never expire. Nothing leaves your phone except the image sent for analysis.</p>
       </div>
+      <GhSyncCard/>
       <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
         <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>Export your history</p>
         <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:14}}>Download every meal, workout and weight entry you've ever logged as a CSV — opens in Excel, Numbers or Google Sheets. Good for a permanent health record, independent of anything stored on this device.</p>
@@ -2451,6 +2556,7 @@ function WeightRow({entry,isEditing,editVal,setEditVal,onTapEdit,onCommit,onDele
   </div>;
 }
 function App() {
+  useEffect(()=>{ghScheduleSync(1500);const on=()=>ghScheduleSync(500);window.addEventListener("online",on);return()=>window.removeEventListener("online",on);},[]);
   const [apiKey,setApiKey]=useState(()=>loadKey());
   const [screen,setScreen]=useState("home");
   const [baseGoal,setBaseGoal]=useState(()=>loadBaseGoal());
