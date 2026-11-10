@@ -99,7 +99,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // Bumped on every delivered build so a stale cached copy (very common with
 // "Add to Home Screen" / re-opened local files) is instantly identifiable —
 // visible in Settings and as a small footer on the home screen.
-const APP_BUILD = "2026.10.09-ghsync-2";
+const APP_BUILD = "2026.11.10-gpt-6.1-terra-1";
 /* ─── Storage tuning ────────────────────────────────────────────────────────
    Meal photos live in localStorage (~5MB cap) and age out. Progress photos
    live in IndexedDB, which has far more room and no retention limit — body
@@ -231,104 +231,23 @@ async function getPinnedBeforePhotos() {
   } catch(e) { console.warn("before-photos read failed:",e); return empty; }
 }
 const loadMeals = d => { try { return JSON.parse(ls.get(`jct:m:${d}`) || "[]"); } catch { return []; } };
-const saveMeals = (d,m) => { const ok = ls.set(`jct:m:${d}`, JSON.stringify(m)); if (ok) ghScheduleSync(); return ok; };
+const saveMeals = (d,m) => ls.set(`jct:m:${d}`, JSON.stringify(m));
 const loadBaseGoal = () => parseInt(ls.get("jct:basegoal") || "1600");
 const saveBaseGoal = g => ls.set("jct:basegoal", String(g));
 const loadKey = () => ls.get("jct:apikey") || "";
 const saveKey = k => ls.set("jct:apikey", k);
 const loadWeights = () => { try { return JSON.parse(ls.get("jct:weights") || "[]"); } catch { return []; } };
-const saveWeights = w => { const ok = ls.set("jct:weights", JSON.stringify(w)); if (ok) ghScheduleSync(); return ok; };
-/* ---- GitHub sync: permanent meal history ----
-   Every day's meals/workouts (photos stripped) and weights are mirrored to a
-   private GitHub repo via the contents API. Never deletes remote files, even
-   when local pruning removes old days. Fails quietly — never blocks the app. */
-const GH_DEFAULT_REPO = "snaglet/jamie-health-data";
-const loadGhToken = () => ls.get("jct:ghtoken") || "";
-const saveGhToken = t => ls.set("jct:ghtoken", t);
-const loadGhRepo = () => ls.get("jct:ghrepo") || GH_DEFAULT_REPO;
-const saveGhRepo = r => ls.set("jct:ghrepo", r);
-const loadGhHashes = () => { try { return JSON.parse(ls.get("jct:ghsync:hashes") || "{}"); } catch { return {}; } };
-const saveGhHashes = h => ls.set("jct:ghsync:hashes", JSON.stringify(h));
-const loadGhStatus = () => { try { return JSON.parse(ls.get("jct:ghsync:status") || "{}"); } catch { return {}; } };
-const ghListeners = new Set();
-const setGhStatus = s => { const next = {...loadGhStatus(), ...s}; ls.set("jct:ghsync:status", JSON.stringify(next)); ghListeners.forEach(f => { try { f(next); } catch {} }); };
-const ghHash = str => { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16) + ":" + str.length; };
-const ghB64 = str => { const bytes = new TextEncoder().encode(str); let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); };
-const ghStrip = list => (Array.isArray(list) ? list : []).map(m => { if (!m || typeof m !== "object") return m; const { imageBase64, imageMime, ...rest } = m; return rest; });
-async function ghPut(token, repo, path, text, message) {
-  const url = `https://api.github.com/repos/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`;
-  const headers = { "Authorization": `Bearer ${token}`, "Accept": "application/vnd.github+json" };
-  for (let attempt = 0; attempt < 3; attempt++) {
-    let sha;
-    const g = await fetch(url + `?t=${Date.now()}`, { headers, cache: "no-store" });
-    if (g.ok) { const j = await g.json(); sha = j.sha; }
-    else if (g.status !== 404) throw new Error(`GET ${path}: HTTP ${g.status}`);
-    const body = { message, content: ghB64(text) }; if (sha) body.sha = sha;
-    const p = await fetch(url, { method: "PUT", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (p.ok) return true;
-    if (p.status === 409 || p.status === 422) continue; // sha conflict — refetch and retry
-    throw new Error(`PUT ${path}: HTTP ${p.status}`);
-  }
-  throw new Error(`PUT ${path}: conflict after retries`);
-}
-async function ghMergeRemoteWeights(token, repo, local) {
-  const r = await fetch(`https://api.github.com/repos/${repo}/contents/weights.json?t=${Date.now()}`, { headers: { "Authorization": `Bearer ${token}`, "Accept": "application/vnd.github+json" }, cache: "no-store" });
-  if (!r.ok) return local;
-  const j = await r.json();
-  const bin = atob((j.content || "").replace(/\s/g, ""));
-  const remote = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0))) || "[]");
-  if (!Array.isArray(remote)) return local;
-  const byDate = {}; remote.forEach(w => { if (w && w.date) byDate[w.date] = w; }); local.forEach(w => { if (w && w.date) byDate[w.date] = w; });
-  return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
-}
-let ghRunning = false, ghAgain = false, ghTimer = null;
-async function ghSyncAll(opts = {}) {
-  const token = loadGhToken(), repo = loadGhRepo();
-  if (!token) { const msg = "No GitHub token set"; setGhStatus({ error: msg }); return { ok: false, error: msg }; }
-  if (ghRunning) { ghAgain = true; return { ok: false, busy: true, error: "A sync is already running — try again in a moment" }; }
-  ghRunning = true;
-  let daysFound = 0, daysUploaded = 0;
-  try {
-    do {
-      ghAgain = false;
-      const files = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (!key || !/^jct:m:\d{4}-\d{2}-\d{2}$/.test(key)) continue;
-        let list = []; try { list = JSON.parse(localStorage.getItem(key) || "[]"); } catch {}
-        files.push([`days/${key.slice(6)}.json`, JSON.stringify(ghStrip(list), null, 2) + "\n"]);
-      }
-      files.sort((a, b) => a[0].localeCompare(b[0]));
-      daysFound = files.length;
-      // Weights: merge with what's already in the repo (local wins per date)
-      // so a device with no/fewer weigh-ins can never wipe the remote history.
-      let weights = loadWeights();
-      try { weights = await ghMergeRemoteWeights(token, repo, weights); } catch (e) { console.warn("weights merge skipped:", e); }
-      files.push(["weights.json", JSON.stringify(weights, null, 2) + "\n"]);
-      const hashes = opts.force ? {} : loadGhHashes(); const k0 = `${repo}|`;
-      let n = 0;
-      for (const [path, text] of files) {
-        const h = ghHash(text);
-        if (hashes[k0 + path] === h) continue;
-        await ghPut(token, repo, path, text, `Sync ${path}`);
-        hashes[k0 + path] = h; saveGhHashes(hashes); n++;
-        if (path.startsWith("days/")) daysUploaded++;
-      }
-      setGhStatus({ lastSync: new Date().toISOString(), error: "", lastCount: n, daysFound, daysUploaded });
-    } while (ghAgain);
-    return { ok: true, daysFound, daysUploaded };
-  } catch (e) {
-    const msg = (navigator.onLine === false ? "Offline — " : "") + (e && e.message || String(e));
-    setGhStatus({ error: msg });
-    return { ok: false, error: msg, daysFound, daysUploaded };
-  } finally { ghRunning = false; }
-}
-function ghScheduleSync(delay = 3000) {
-  if (!loadGhToken()) return;
-  clearTimeout(ghTimer);
-  ghTimer = setTimeout(() => { ghSyncAll().catch(() => {}); }, delay);
-}
-
+const saveWeights = w => ls.set("jct:weights", JSON.stringify(w));
+// Body measurements — same shape and storage pattern as weight (one entry
+// per date, one decimal, never auto-deleted by the retention/cutoff rules),
+// just keyed per measurement type so adding another one later is a one-line
+// change to this list, not a new set of load/save functions.
+const MEASUREMENTS = [
+  { key:"waist", label:"Waist" },
+  { key:"chest", label:"Chest" },
+];
+const loadMeasurements = type => { try { return JSON.parse(ls.get(`jct:measure:${type}`) || "[]"); } catch { return []; } };
+const saveMeasurements = (type, arr) => ls.set(`jct:measure:${type}`, JSON.stringify(arr));
 const loadWorkoutLabels = () => { try { return JSON.parse(ls.get("jct:wlabels") || "[]"); } catch { return []; } };
 const saveWorkoutLabels = arr => ls.set("jct:wlabels", JSON.stringify(arr));
 const loadLibrary = () => { try { return JSON.parse(ls.get("jct:lib") || "[]"); } catch { return []; } };
@@ -445,7 +364,7 @@ function csvField(v) {
   const s = v==null ? "" : String(v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
 }
-const CSV_HEADER = ["Date","Type","Title","Time","Calories","Protein_g","Carbs_g","Fat_g","SatFat_g","Weight_lbs","Ingredients"];
+const CSV_HEADER = ["Date","Type","Title","Time","Calories","Protein_g","Carbs_g","Fat_g","SatFat_g","Weight_lbs","Waist_in","Chest_in","Ingredients"];
 /* Rows for every meal/workout on days strictly before cutoffKey (or every
    stored day, if cutoffKey is omitted) plus every weight entry in that same
    range — the exact slice that deleteMealsBefore would otherwise erase. */
@@ -467,15 +386,25 @@ function buildHistoryCsvRows(cutoffKey) {
         rows.push([
           dayKey, m.type==="workout" ? "Workout" : "Meal", m.mealTitle||"", m.time||"",
           Math.round(m.totalCalories||0), Math.round(m.totalProteinG||0), Math.round(m.totalCarbsG||0),
-          Math.round(m.totalFatG||0), Math.round(m.totalSatFatG||0), "", ingredients
+          Math.round(m.totalFatG||0), Math.round(m.totalSatFatG||0), "", "", "", ingredients
         ]);
       });
     }
   } catch(e) { console.warn("history export (meals) failed:", e); }
   try {
     const weights = loadWeights().filter(w => !cutoffKey || w.date < cutoffKey);
-    weights.forEach(w => rows.push([w.date,"Weight","Weight","",  "","","","","", w.value, ""]));
+    weights.forEach(w => rows.push([w.date,"Weight","Weight","",  "","","","","", w.value, "", "", ""]));
   } catch(e) { console.warn("history export (weights) failed:", e); }
+  try {
+    MEASUREMENTS.forEach(({key,label}) => {
+      const entries = loadMeasurements(key).filter(w => !cutoffKey || w.date < cutoffKey);
+      entries.forEach(w => {
+        const row = [w.date,label,label,"","","","","","","","","",""];
+        row[key==="waist"?10:11] = w.value;
+        rows.push(row);
+      });
+    });
+  } catch(e) { console.warn("history export (measurements) failed:", e); }
   rows.sort((a,b) => String(a[0]).localeCompare(String(b[0])));
   return rows;
 }
@@ -570,7 +499,7 @@ ACCURACY RULES:
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: "gpt-6-astra",
+        model: "gpt-6.1-terra",
         messages: [
           { role: "system", content: sysPrompt },
           { role: "user", content: contentArr }
@@ -898,8 +827,10 @@ function MacroMini({label,value,target,color,onOpen}) {
     </div>
   </div>;
 }
-/* Full-width weight chart with min/max labels and a 7-day delta. */
-function WeightChart({data,height=84}) {
+/* Full-width trend chart with min/max labels — originally weight-only, now
+   shared with body measurements too via the unit prop (defaults to weight's
+   "lbs" so the existing call site needs no changes). */
+function WeightChart({data,height=84,unit="lbs"}) {
   if (!data.length) return null;
   const pts = data.slice(-30);
   if (pts.length < 2) return <p style={{fontSize:11,fontWeight:300,color:C.dim}}>Log another day to see the trend</p>;
@@ -925,7 +856,7 @@ function WeightChart({data,height=84}) {
     </svg>
     <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
       <span style={{fontSize:10,fontWeight:300,color:C.dim}}>{shortDate(new Date(pts[0].date+"T12:00:00").getTime())} · {pts[0].value}</span>
-      <span style={{fontSize:10,fontWeight:300,color:C.dim}}>range {mn}–{mx} lbs</span>
+      <span style={{fontSize:10,fontWeight:300,color:C.dim}}>range {mn}–{mx} {unit}</span>
     </div>
   </div>;
 }
@@ -1100,50 +1031,6 @@ function WorkoutModal({onAdd,onClose}) {
     </div>
   </div>;
 }
-function GhSyncCard() {
-  const [token,setToken]=useState(()=>loadGhToken());
-  const [val,setVal]=useState("");
-  const [repo,setRepo]=useState(()=>loadGhRepo());
-  const [st,setSt]=useState(()=>loadGhStatus());
-  const [busy,setBusy]=useState(false);
-  useEffect(()=>{ghListeners.add(setSt);return()=>{ghListeners.delete(setSt);};},[]);
-  const masked = token ? `${token.slice(0,11)}...${token.slice(-4)}` : null;
-  const saveTok=()=>{const t=val.trim();if(!t)return;saveGhToken(t);setToken(t);setVal("");ghScheduleSync(200);};
-  const clearTok=()=>{saveGhToken("");setToken("");};
-  const saveRepoVal=v=>{setRepo(v);saveGhRepo(v.trim()||GH_DEFAULT_REPO);};
-  const [result,setResult]=useState("");
-  const syncNow=async()=>{
-    if(busy)return;
-    setBusy(true);setResult("");
-    let res;
-    try{res=await ghSyncAll({force:true});}catch(e){res={ok:false,error:e&&e.message||String(e)};}
-    setBusy(false);
-    if(res&&res.ok){
-      setResult(res.daysFound===0
-        ?"⚠ Synced, but no meal days were found on this device. If you log meals in the home-screen app, open Settings there (Safari and the home-screen app keep separate storage)."
-        :`✓ Synced ${res.daysUploaded} day${res.daysUploaded===1?"":"s"} (${res.daysFound} found on this device) + weights`);
-    }else setResult(`✗ ${res&&res.error||"Sync failed"}`);
-  };
-  const inp={width:"100%",background:C.hover,border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:14,padding:"12px 14px",outline:"none",fontFamily:"'Inter',sans-serif",marginBottom:8};
-  return <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
-    <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>GitHub sync (permanent history)</p>
-    <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:12}}>Backs up every day's meals and workouts (without photos) and your weights to a private GitHub repo, automatically after each change. Old days pruned from this phone stay in the repo forever.</p>
-    <p style={{fontSize:12,color:C.sub,marginBottom:6}}>GitHub token</p>
-    {masked&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"10px 12px",background:C.aDim,borderRadius:10,border:`1px solid ${C.aMid}`}}>
-      <div style={{flex:1}}><span style={{fontSize:11,color:C.accent,fontWeight:600}}>✓ Token saved: </span><span style={{fontSize:11,color:C.sub,fontFamily:"monospace"}}>{masked}</span></div>
-      <button style={{background:C.rDim,border:`1px solid ${C.rMid}`,borderRadius:8,color:C.red,fontSize:11,fontWeight:500,padding:"4px 10px"}} onClick={clearTok}>Clear</button>
-    </div>}
-    <input type="password" placeholder={masked?"Enter a new token to replace...":"github_pat_..."} value={val} onChange={e=>setVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveTok()} style={inp}/>
-    <button style={{width:"100%",background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:12,color:C.accent,fontSize:13,fontWeight:500,padding:"10px",marginBottom:12}} onClick={saveTok}>Save token</button>
-    <p style={{fontSize:12,color:C.sub,marginBottom:6}}>Repository (owner/name)</p>
-    <input type="text" value={repo} placeholder={GH_DEFAULT_REPO} onChange={e=>saveRepoVal(e.target.value)} style={inp}/>
-    <button style={{width:"100%",background:C.accent,border:"none",borderRadius:12,color:C.bg,fontSize:14,fontWeight:500,padding:"12px",opacity:(token&&!busy)?1:0.4}} disabled={!token||busy} onClick={syncNow}>{busy?"Syncing…":"Sync now"}</button>
-    {result&&<p style={{fontSize:12,fontWeight:500,color:result.startsWith("✓")?C.accent:C.red,textAlign:"center",marginTop:10,lineHeight:1.5}}>{result}</p>}
-    <p style={{fontSize:11,color:st.error?C.red:C.dim,textAlign:"center",marginTop:10}}>
-      {st.error?`Sync error: ${st.error}`:st.lastSync?`Last synced ${new Date(st.lastSync).toLocaleString()}${st.daysFound!=null?` · ${st.daysFound} days on this device`:""}`:"Not synced yet"}
-    </p>
-  </div>;
-}
 function SettingsScreen({apiKey,onSave,onClear,onBack,goal,onDeleteBefore}) {
   const [val,setVal]=useState("");
   const [saved,setSaved]=useState(false);
@@ -1233,10 +1120,9 @@ function SettingsScreen({apiKey,onSave,onClear,onBack,goal,onDeleteBefore}) {
         <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:8}}>Photos & storage</p>
         <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.7}}>Meal photos aren't saved — meals are shown with an emoji instead, to keep this app from running out of space. Any older meal photos saved before this change still get cleared automatically after {PHOTO_RETENTION_DAYS} days. Full meal entries (calories, ingredients) are automatically cleared after {MEAL_RETENTION_DAYS} days so the app never runs out of space. Progress photos are stored separately at {PROGRESS_MAX_PX}px and never expire. Nothing leaves your phone except the image sent for analysis.</p>
       </div>
-      <GhSyncCard/>
       <div style={{background:C.surface,borderRadius:18,border:`1px solid ${C.border}`,padding:"18px"}}>
         <p style={{fontSize:14,fontWeight:500,color:C.text,marginBottom:6}}>Export your history</p>
-        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:14}}>Download every meal, workout and weight entry you've ever logged as a CSV — opens in Excel, Numbers or Google Sheets. Good for a permanent health record, independent of anything stored on this device.</p>
+        <p style={{fontSize:12,fontWeight:300,color:C.sub,lineHeight:1.6,marginBottom:14}}>Download every meal, workout, weight and body measurement entry you've ever logged as a CSV — opens in Excel, Numbers or Google Sheets. Good for a permanent health record, independent of anything stored on this device.</p>
         <button style={{width:"100%",background:C.aDim,border:`1px solid ${C.aMid}`,borderRadius:12,color:C.accent,fontSize:14,fontWeight:500,padding:"12px"}} onClick={exportAll}>Export all history (CSV)</button>
         {exportMsg&&<p style={{fontSize:12,color:C.accent,fontWeight:500,textAlign:"center",marginTop:10}}>{exportMsg}</p>}
       </div>
@@ -1272,7 +1158,7 @@ function ApiKeyScreen({onSave}) {
       <span style={{fontSize:52,marginBottom:12}}>⚡</span>
       <h1 style={{fontSize:32,fontWeight:200,color:C.text,textAlign:"center",lineHeight:1.15,letterSpacing:"-1.5px",marginBottom:6}}>Cally Tally</h1>
       <p style={{color:C.sub,fontSize:13,fontWeight:300,marginTop:6}}>Calories, weight & workouts</p>
-      <p style={{color:C.accent,fontSize:12,fontWeight:300,marginBottom:28,marginTop:6}}>Powered by GPT-6 Astra Vision</p>
+      <p style={{color:C.accent,fontSize:12,fontWeight:300,marginBottom:28,marginTop:6}}>Powered by GPT-6.1 Terra Vision</p>
       <div style={{width:"100%",background:C.surface,borderRadius:20,padding:"24px 20px",border:`1px solid ${C.border}`}}>
         <p style={{color:C.sub,fontSize:13,lineHeight:1.7,textAlign:"center",marginBottom:4}}>Enter your OpenAI API key to get started.</p>
         <p style={{color:C.dim,fontSize:12,lineHeight:1.6,textAlign:"center",marginBottom:16}}>Get one at <span style={{color:C.accent}}>platform.openai.com/api-keys</span></p>
@@ -1294,12 +1180,15 @@ const ActionBtn = ({onClick,tone,icon,label}) => {
     <span style={{fontSize:10,fontWeight:400,color:fg,opacity:0.85}}>{label}</span>
   </button>;
 };
-function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAddWorkout,onOpenSettings,onOpenWeightHistory,onOpenProgress,onOpenMacro,meals,goal,baseGoal,setBaseGoal,date,setDate,beforePhotos,photoChecked}) {
+function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAddWorkout,onOpenSettings,onOpenWeightHistory,onOpenMeasureHistory,onOpenProgress,onOpenMacro,meals,goal,baseGoal,setBaseGoal,date,setDate,beforePhotos,photoChecked}) {
   const [editGoal,setEditGoal]=useState(false);
   const [goalVal,setGoalVal]=useState(String(baseGoal));
   const [weightLog,setWeightLog]=useState(()=>loadWeights());
   const [editWeight,setEditWeight]=useState(false);
   const [weightVal,setWeightVal]=useState("");
+  const [measureLog,setMeasureLog]=useState(()=>({waist:loadMeasurements("waist"), chest:loadMeasurements("chest")}));
+  const [editMeasure,setEditMeasure]=useState(null);
+  const [measureVal,setMeasureVal]=useState("");
   const [showWorkout,setShowWorkout]=useState(false);
   const [flashPhotos,setFlashPhotos]=useState(null);
   const [flashMode,setFlashMode]=useState(null); // 'auto' (Say It) | 'manual' (Photo)
@@ -1377,6 +1266,29 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
   // one digit (150.3, never 150.27) regardless of what the keyboard lets
   // someone type.
   const commitWeight=()=>{const n=parseFloat(weightVal);if(!isNaN(n)&&n>0){const v=Math.round(n*10)/10;const entry={date:fmtKey(new Date()),value:v};const next=[...weightLog.filter(w=>w.date!==entry.date),entry].sort((a,b)=>a.date.localeCompare(b.date));setWeightLog(next);saveWeights(next);}setEditWeight(false);};
+  // Same one-decimal convention as weight, just keyed by measurement type.
+  const commitMeasure = type => {
+    const n=parseFloat(measureVal);
+    if(!isNaN(n)&&n>0){
+      const v=Math.round(n*10)/10;
+      const entry={date:fmtKey(new Date()),value:v};
+      const next=[...measureLog[type].filter(e=>e.date!==entry.date),entry].sort((a,b)=>a.date.localeCompare(b.date));
+      setMeasureLog(prev=>({...prev,[type]:next}));
+      saveMeasurements(type,next);
+    }
+    setEditMeasure(null);
+  };
+  const measureWeekDelta = type => {
+    const log=measureLog[type];
+    if (log.length<2) return null;
+    const cutoff=new Date(); cutoff.setDate(cutoff.getDate()-7);
+    const key=fmtKey(cutoff);
+    const older=log.filter(w=>w.date<=key);
+    const ref=older.length?older[older.length-1]:log[0];
+    const latest=log[log.length-1].value;
+    const d=Math.round((latest-ref.value)*10)/10;
+    return d===0?null:d;
+  };
   const shift=days=>{const d=new Date(date);d.setDate(d.getDate()+days);setDate(d);};
   return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:"calc(env(safe-area-inset-bottom,12px) + 104px)"}}>
     <div style={{padding:"env(safe-area-inset-top,44px) 20px 0",background:`linear-gradient(180deg,${C.surface} 0%,${C.bg} 100%)`}}>
@@ -1470,6 +1382,38 @@ function HomeScreen({onOpenCamera,onOpenDescribe,onOpenLibrary,onSelectMeal,onAd
         {weightLog.length>=2
           ? <WeightChart data={weightLog} height={58}/>
           : <p style={{fontSize:11,fontWeight:300,color:C.dim,paddingTop:4}}>{editWeight?"lbs, then return":"Log two days to see the trend"}</p>}
+      </div>
+    </div>
+    {/* ── Body measurements, full width ── */}
+    <div style={{padding:"0 16px 16px"}}>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:20,padding:"18px 20px"}}>
+        <span style={{fontSize:10,fontWeight:400,color:C.dim,textTransform:"uppercase",letterSpacing:"1px"}}>Measurements</span>
+        <div style={{display:"flex",gap:24,marginTop:10}}>
+          {MEASUREMENTS.map(({key,label})=>{
+            const log=measureLog[key];
+            const latest=log.length>0?log[log.length-1].value:0;
+            const isEditing=editMeasure===key;
+            const delta=measureWeekDelta(key);
+            return <div key={key} style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{fontSize:11,fontWeight:400,color:C.sub}}>{label}</span>
+                <button style={{background:"none",border:"none",color:C.dim,fontSize:10,padding:0}} onClick={()=>onOpenMeasureHistory(key)}>History ›</button>
+              </div>
+              <div style={{display:"flex",alignItems:"baseline",gap:5}}>
+                {isEditing
+                  ?<input autoFocus type="number" inputMode="decimal" step="0.1" style={{background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.text,fontSize:24,fontWeight:200,fontFamily:"'Inter',sans-serif",letterSpacing:"-1px",outline:"none",padding:0,width:68,lineHeight:1}} placeholder="0" value={measureVal} onChange={e=>setMeasureVal(e.target.value)} onBlur={()=>commitMeasure(key)} onKeyDown={e=>e.key==="Enter"&&commitMeasure(key)}/>
+                  :<span style={{fontSize:24,fontWeight:200,color:C.text,letterSpacing:"-1px",lineHeight:1,cursor:"pointer"}} onClick={()=>{setMeasureVal(latest>0?String(latest):"");setEditMeasure(key);}}>{latest>0?latest:"—"}</span>
+                }
+                <span style={{fontSize:11,fontWeight:300,color:C.dim}}>in</span>
+                {isEditing
+                  ?<button style={{width:22,height:22,borderRadius:"50%",background:C.accent,border:"none",color:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,flexShrink:0,marginLeft:1}} onClick={()=>commitMeasure(key)}>✓</button>
+                  :<span style={{color:C.dim,cursor:"pointer",display:"inline-flex"}} onClick={()=>{setMeasureVal(latest>0?String(latest):"");setEditMeasure(key);}}><IcEdit size={11}/></span>
+                }
+              </div>
+              {delta!==null&&!isEditing&&<span style={{fontSize:10,fontWeight:300,color:delta<0?C.accent:C.orange,marginTop:2,display:"block"}}>{delta<0?"↓":"↑"}{Math.abs(delta)} / 7d</span>}
+            </div>;
+          })}
+        </div>
       </div>
     </div>
     <div style={{padding:"0 16px"}}>
@@ -1608,7 +1552,7 @@ function PhotoScreen({apiKey,imageData,imagePreview,onBack,onAdd}) {
       setSubmitting(false);
     }
   };
-  if (submitting && !error) return <Spinner text={retryNote||"Analyzing with GPT-6 Astra..."}/>;
+  if (submitting && !error) return <Spinner text={retryNote||"Analyzing with GPT-6.1 Terra..."}/>;
   return <div style={{height:"100%",background:C.bg,display:"flex",flexDirection:"column"}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"calc(env(safe-area-inset-top,44px) + 8px) 16px 8px",flexShrink:0}}>
       <button style={{width:40,height:40,borderRadius:11,background:C.hover,border:`1px solid ${C.border}`,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{speech.stop();onBack();}}><IcBack/></button>
@@ -2586,14 +2530,88 @@ function WeightRow({entry,isEditing,editVal,setEditVal,onTapEdit,onCommit,onDele
     </div>
   </div>;
 }
+/* Same shape as WeightHistoryScreen/WeightRow, generalized across the
+   MEASUREMENTS list (currently Waist, Chest) with an in-screen tab switcher
+   instead of a dedicated screen per type — there are only two of these and
+   they're otherwise identical, so one parameterized screen beats copy-pasting
+   WeightHistoryScreen a second (and third, and...) time. */
+function MeasurementHistoryScreen({type,onBack}) {
+  const [activeType,setActiveType]=useState(type);
+  const [log,setLog]=useState(()=>loadMeasurements(type).sort((a,b)=>a.date.localeCompare(b.date)));
+  const [editDate,setEditDate]=useState(null);
+  const [editVal,setEditVal]=useState("");
+  const label = MEASUREMENTS.find(m=>m.key===activeType)?.label || activeType;
+  useEffect(()=>{
+    setLog(loadMeasurements(activeType).sort((a,b)=>a.date.localeCompare(b.date)));
+    setEditDate(null);
+  }, [activeType]);
+  const saveAll = next => {
+    const sorted=[...next].sort((a,b)=>a.date.localeCompare(b.date));
+    setLog(sorted);
+    saveMeasurements(activeType, sorted);
+  };
+  const commitEdit = date => {
+    const n=parseFloat(editVal);
+    if(!isNaN(n)&&n>0) saveAll(log.map(w=>w.date===date?{...w,value:Math.round(n*10)/10}:w));
+    setEditDate(null);
+  };
+  const deleteEntry = date => saveAll(log.filter(w=>w.date!==date));
+  const fmt = dateStr => new Date(dateStr+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+  const cutoff = fmtKey(new Date(Date.now()-30*86400000));
+  const recent = log.filter(w=>w.date>=cutoff).slice().reverse();
+  const Tab = ({id,lbl}) => <button
+    style={{flex:1,padding:"9px",borderRadius:10,border:"none",fontSize:13,fontWeight:400,
+      background: activeType===id?C.aDim:"transparent", color: activeType===id?C.accent:C.sub}}
+    onClick={()=>setActiveType(id)}>{lbl}</button>;
+  return <div style={{height:"100%",background:C.bg,overflowY:"auto",paddingBottom:48}}>
+    <StickyHeader left={<HeaderBtn onClick={onBack}><IcBack/></HeaderBtn>} title={`${label} history`}/>
+    <div style={{padding:"16px 16px 0"}}>
+      <div style={{display:"flex",gap:6,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:4,marginBottom:16}}>
+        {MEASUREMENTS.map(m=><Tab key={m.key} id={m.key} lbl={m.label}/>)}
+      </div>
+      {log.length>=2
+        ? <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:"16px 16px 12px",marginBottom:16}}>
+            <WeightChart data={log} height={70} unit="in"/>
+          </div>
+        : <p style={{fontSize:11,fontWeight:300,color:C.dim,marginBottom:16}}>Log two days to see the trend</p>}
+      <p style={{fontSize:12,fontWeight:300,color:C.dim,marginBottom:16}}>Last 30 days — swipe left to delete</p>
+      {recent.length===0&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"48px 0",gap:10}}>
+        <span style={{fontSize:36}}>📏</span>
+        <p style={{color:C.sub,fontSize:14,fontWeight:300,textAlign:"center"}}>No {label.toLowerCase()} entries yet.</p>
+      </div>}
+      {recent.map(w=><MeasurementRow key={w.date} entry={w} unit="in" isEditing={editDate===w.date} editVal={editVal} setEditVal={setEditVal} onTapEdit={()=>{setEditDate(w.date);setEditVal(String(w.value));}} onCommit={()=>commitEdit(w.date)} onDelete={()=>deleteEntry(w.date)} fmt={fmt}/>)}
+    </div>
+  </div>;
+}
+function MeasurementRow({entry,unit,isEditing,editVal,setEditVal,onTapEdit,onCommit,onDelete,fmt}) {
+  const {swipeX,swiping,handlers}=useSwipeDelete(onDelete,70);
+  return <div style={{position:"relative",marginBottom:8,borderRadius:14,overflow:"hidden"}}>
+    <div style={{position:"absolute",inset:0,background:C.red,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:18}}>
+      <span style={{color:"#fff",fontSize:12,fontWeight:400,marginRight:4}}>Delete</span><IcTrash/>
+    </div>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,transform:`translateX(${swipeX}px)`,transition:swiping?"none":"transform 0.3s ease"}}
+      {...handlers}>
+      <span style={{fontSize:13,fontWeight:300,color:C.sub}}>{fmt(entry.date)}</span>
+      <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+        {isEditing
+          ?<input autoFocus type="number" inputMode="decimal" step="0.1" style={{width:70,background:"transparent",border:"none",borderBottom:`2px solid ${C.accent}`,color:C.accent,fontSize:18,fontWeight:200,fontFamily:"'Inter',sans-serif",textAlign:"right",outline:"none",letterSpacing:"-0.5px"}} value={editVal} onChange={e=>setEditVal(e.target.value)} onBlur={onCommit} onKeyDown={e=>e.key==="Enter"&&onCommit()}/>
+          :<span style={{fontSize:18,fontWeight:200,color:C.text,letterSpacing:"-0.5px",cursor:"pointer"}} onClick={onTapEdit}>{entry.value}</span>
+        }
+        <span style={{fontSize:11,fontWeight:300,color:C.dim}}>{unit}</span>
+        {isEditing&&<button style={{width:24,height:24,borderRadius:"50%",background:C.accent,border:"none",color:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0}} onClick={onCommit}>✓</button>}
+        {!isEditing&&<span style={{color:C.dim,cursor:"pointer",display:"inline-flex",alignItems:"center"}} onClick={onTapEdit}><IcEdit/></span>}
+      </div>
+    </div>
+  </div>;
+}
 function App() {
-  useEffect(()=>{ghScheduleSync(1500);const on=()=>ghScheduleSync(500);window.addEventListener("online",on);return()=>window.removeEventListener("online",on);},[]);
   const [apiKey,setApiKey]=useState(()=>loadKey());
   const [screen,setScreen]=useState("home");
   const [baseGoal,setBaseGoal]=useState(()=>loadBaseGoal());
   const [selected,setSelected]=useState(null);
   const [camImg,setCamImg]=useState({imageData:null,preview:null});
   const [macroMetric,setMacroMetric]=useState("protein");
+  const [measureMetric,setMeasureMetric]=useState("waist");
   const [preview,setPreview]=useState(null);
   const [beforePhotos,setBeforePhotos]=useState({front:null, side:null});
   const [photoChecked,setPhotoChecked]=useState(false);
@@ -2699,6 +2717,7 @@ function App() {
       onAddWorkout={addWorkout} onSelectMeal={selectMeal}
       onOpenSettings={()=>setScreen("settings")}
       onOpenWeightHistory={()=>setScreen("weightHistory")}
+      onOpenMeasureHistory={type=>{setMeasureMetric(type);setScreen("measureHistory");}}
       onOpenProgress={()=>setScreen("progress")}
       onOpenMacro={m=>{setMacroMetric(m);setScreen("macroHistory");}}
       meals={meals} goal={effectiveGoal} baseGoal={baseGoal}
@@ -2720,6 +2739,7 @@ function App() {
     {screen==="detail"&&selected&&<DetailScreen meal={selected} onBack={leaveDetail} onUpdate={updateMeal} onDelete={deleteMeal} apiKey={apiKey}/>}
     {screen==="settings"&&<SettingsScreen apiKey={apiKey} onSave={saveApiKey} onClear={clearApiKey} onBack={()=>setScreen("home")} goal={effectiveGoal} onDeleteBefore={deleteMealsBeforeDate}/>}
     {screen==="weightHistory"&&<WeightHistoryScreen onBack={()=>setScreen("home")}/>}
+    {screen==="measureHistory"&&<MeasurementHistoryScreen type={measureMetric} onBack={()=>setScreen("home")}/>}
     {screen==="macroHistory"&&<NutrientHistoryScreen metric={macroMetric} goal={effectiveGoal} onBack={()=>setScreen("home")}/>}
   </div>;
 }
